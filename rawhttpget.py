@@ -73,6 +73,8 @@ class RawGet:
         self.sendsock = -1
         self.recvsock = -1
         self.file_name = "index.html"
+        self.local_ip = ""
+        self.remote_ip = ""
 
 
     def start(self):
@@ -84,6 +86,11 @@ class RawGet:
             sys.exit()
 
         host, path = self.handle_url()
+        request = "GET " + path + " HTTP/1.1\r\n" + "Host: " + host + "\r\nConnection: keep-alive\r\n\r\n"
+
+        self.remote_ip = self.sendsock.gethostbyname(host)
+        self.local_ip = self.sendsock.getsockname()
+
 
 
 
