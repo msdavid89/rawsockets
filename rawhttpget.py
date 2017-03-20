@@ -6,7 +6,7 @@ import struct
 import random
 
 
-class IPHandler:
+class IPHeader:
     """
      0                   1                   2                   3
      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -22,16 +22,10 @@ class IPHandler:
     |                    Destination Address                        |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     |                    Options                    |    Padding    |
-    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+"""
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    """
 
-    def __init__(self, data):
-        try:
-            self.sendsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
-            self.recvsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
-        except socket.error:
-            print("Failed to create socket. Womp womp.")
-            sys.exit()
-
+    def __init__(self):
         self.version = 4
         self.ihl = 5
         self.tos = 0
@@ -44,14 +38,24 @@ class IPHandler:
         self.chksum = 0
         self.src = 0
         self.dst = 0
-        self.data = data
+        self.data = ""
 
 
 
 
+class IPHandler:
+
+    def __init__(self):
+        try:
+            self.sendsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
+            self.recvsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
+        except socket.error:
+            print("Failed to create socket. Womp womp.")
+            sys.exit()
 
 
-class TCPHandler:
+
+class TCPHeader:
     """
 0                   1                   2                   3
 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -74,10 +78,23 @@ class TCPHandler:
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     """
     def __init__(self):
-        self.sock = IPHandler()
 
+
+class TCPHandler:
+
+    def __init__(self):
+        self.sock = IPHandler()
+        self.remote_ip = ""
+        self.remote_port = ""
+        self.local_ip = ""
+        self.local_port = ""
 
     def tcp_connect(self, dst, port="80"):
+        self.remote_ip = self.sock.gethostbyname(dst)
+        self.remote_port = port
+        self.local_ip = self.sock.getsockname()
+        self.local_port =
+
 
     def send(self):
 
@@ -101,8 +118,6 @@ class RawGet:
     def start(self):
         self.host, self.path = self.handle_url()
         self.request = "GET " + path + " HTTP/1.1\r\n" + "Host: " + host + "\r\nConnection: keep-alive\r\n\r\n"
-        #self.remote_ip = self.sock.gethostbyname(host)
-        #self.local_ip = self.sock.getsockname()
         self.html_file = open(self.file_name, "wb+")
         self.handle_connection()
 
