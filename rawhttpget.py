@@ -77,6 +77,11 @@ class TCPHandler:
         self.sock = IPHandler()
 
 
+    def tcp_connect(self, dst, port="80"):
+
+    def send(self):
+
+    def tcp_close(self):
 
 
 class RawGet:
@@ -84,23 +89,22 @@ class RawGet:
     def __init__(self, url):
         self.sock = TCPHandler()
         self.url = url
-        self.sendsock = -1
-        self.recvsock = -1
+        self.host = ""
+        self.path = ""
+        self.request = ""
         self.file_name = "index.html"
+        self.html_file = -1
         self.local_ip = ""
         self.remote_ip = ""
 
 
     def start(self):
-
-
-        host, path = self.handle_url()
-        request = "GET " + path + " HTTP/1.1\r\n" + "Host: " + host + "\r\nConnection: keep-alive\r\n\r\n"
-
-        self.remote_ip = self.sock.gethostbyname(host)
-        self.local_ip = self.sock.getsockname()
-
-
+        self.host, self.path = self.handle_url()
+        self.request = "GET " + path + " HTTP/1.1\r\n" + "Host: " + host + "\r\nConnection: keep-alive\r\n\r\n"
+        #self.remote_ip = self.sock.gethostbyname(host)
+        #self.local_ip = self.sock.getsockname()
+        self.html_file = open(self.file_name, "wb+")
+        self.handle_connection()
 
 
     def handle_url(self):
@@ -113,6 +117,28 @@ class RawGet:
         if not (path == "" or path[-1:] == "/"):
             self.file_name = file[0]
         return hostname, path
+
+    def handle_connection(self):
+        try:
+            self.sock.tcp_connect(self.host, 80)
+            self.pass_to_tcp(self)
+            received = self.recv_from_tcp()
+        except:
+            sys.exit("Error!")
+        if received:
+            self.html_file.write(received)
+        finally:
+            self.sock.tcp_close()
+
+
+    def pass_to_tcp(self):
+        try:
+            self.sock.send(self.request)
+        except socket.error:
+            sys.exit("Error while sending.")
+
+
+    def recv_from_tcp(self):
 
 
 
