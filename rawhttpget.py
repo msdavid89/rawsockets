@@ -6,7 +6,7 @@ import struct
 import random
 
 
-class IPHeader:
+class IPHandler:
     """
      0                   1                   2                   3
      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -25,6 +25,13 @@ class IPHeader:
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+"""
 
     def __init__(self, data):
+        try:
+            self.sendsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
+            self.recvsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
+        except socket.error:
+            print("Failed to create socket. Womp womp.")
+            sys.exit()
+
         self.version = 4
         self.ihl = 5
         self.tos = 0
@@ -41,7 +48,10 @@ class IPHeader:
 
 
 
-class TCPHeader:
+
+
+
+class TCPHandler:
     """
 0                   1                   2                   3
 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -63,12 +73,16 @@ class TCPHeader:
 |   .... data ....                                              |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     """
+    def __init__(self):
+        self.sock = IPHandler()
+
 
 
 
 class RawGet:
 
     def __init__(self, url):
+        self.sock = TCPHandler()
         self.url = url
         self.sendsock = -1
         self.recvsock = -1
@@ -78,18 +92,13 @@ class RawGet:
 
 
     def start(self):
-        try:
-            self.sendsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
-            self.recvsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
-        except socket.error:
-            print("Failed to create socket. Womp womp.")
-            sys.exit()
+
 
         host, path = self.handle_url()
         request = "GET " + path + " HTTP/1.1\r\n" + "Host: " + host + "\r\nConnection: keep-alive\r\n\r\n"
 
-        self.remote_ip = self.sendsock.gethostbyname(host)
-        self.local_ip = self.sendsock.getsockname()
+        self.remote_ip = self.sock.gethostbyname(host)
+        self.local_ip = self.sock.getsockname()
 
 
 
