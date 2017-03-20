@@ -1,6 +1,6 @@
 import argparse
 import sys
-import urllib
+from urlparse import urlparse
 import socket
 import struct
 import random
@@ -72,6 +72,7 @@ class RawGet:
         self.url = url
         self.sendsock = -1
         self.recvsock = -1
+        self.file_name = "index.html"
 
 
     def start(self):
@@ -82,7 +83,20 @@ class RawGet:
             print("Failed to create socket. Womp womp.")
             sys.exit()
 
+        host, path = self.handle_url()
 
+
+
+    def handle_url(self):
+        if "http://" not in self.url:
+            self.url = "http://" + self.url
+        host = urlparse(self.url)
+        hostname = host[1]
+        path = host[2]
+        file = path.split('/')[-1:]
+        if not (path == "" or path[-1:] == "/"):
+            self.file_name = file[0]
+        return hostname, path
 
 
 
