@@ -40,6 +40,15 @@ class IPHeader:
         self.dst_ip = dst_ip
         self.payload = payload
 
+    def gen_hdr_to_send(self):
+
+    def gen_pseudohdr(self):
+
+    def parse_hdr(self):
+
+    def verify_ip_hdr(self):
+
+    def ip_checksum(self):
 
 
 
@@ -53,6 +62,9 @@ class IPHandler:
         except socket.error:
             print("Failed to create socket. Womp womp.")
             sys.exit()
+
+
+    def send(self, payload):
 
 
 
@@ -96,6 +108,27 @@ class TCPHeader:
         self.urgent = 0
         self.data = payload
 
+
+    def gen_hdr_to_send(self):
+
+
+    def gen_pseudohdr(self):
+
+
+    def parse_hdr(self):
+
+
+    def verify_tcp_hdr(self):
+
+    def tcp_checksum(self, msg):
+        s = 0
+        for i in range(0, len(msg), 2):
+            w = ord(msg[i]) + (ord(msg[i + 1]) << 8)
+            s = s + w
+        s = (s >> 16) + (s & 0xffff)
+        s = s + (s >> 16)
+        s = ~s & 0xffff
+        return s
 
 
 class TCPHandler:
@@ -149,15 +182,7 @@ class TCPHandler:
     def tcp_close(self):
 
 
-    def tcp_checksum(self, msg):
-        s = 0
-        for i in range(0, len(msg), 2):
-            w = ord(msg[i]) + (ord(msg[i + 1]) << 8)
-            s = s + w
-        s = (s >> 16) + (s & 0xffff)
-        s = s + (s >> 16)
-        s = ~s & 0xffff
-        return s
+
 
 
 
