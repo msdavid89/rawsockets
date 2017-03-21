@@ -3,7 +3,8 @@ import sys
 from urlparse import urlparse
 import socket
 import struct
-import random
+from random import randint
+import time
 
 
 def checksum(msg):
@@ -76,6 +77,10 @@ class IPHandler:
 
     def send(self, payload):
 
+    def recv(self):
+
+
+
 
 
 class TCPHeader:
@@ -143,7 +148,7 @@ class TCPHeader:
 
         #Assemble final header, finally!
         self.tcp_header = struct.pack('!HHLLBBHHH', self.src_port, self.dst_port, self.seq_no, self.ack_no, self.offset_reserved, self.flags, self.wnd, self.check, self.urg_ptr)
-
+        return self.tcp_header + self.data
 
 
     def gen_pseudohdr(self):
@@ -186,6 +191,11 @@ class TCPHandler:
         self.sock = IPHandler(self.local_ip, self.remote_ip)
 
         #Three-Way Handshake
+        self.seq_num = randint(0,65535)
+        packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port)
+        syn_packet = packet.gen_hdr_to_send("syn", self.seq_num, self.ack_num)
+        self.pass_to_IP(syn_packet)
+
 
 
     def bind_to_open_port(self):
@@ -207,6 +217,15 @@ class TCPHandler:
             self.sock.send(payload)
         except:
             print("Error: Failed to send at IP Layer")
+
+    def receive(self):
+
+    def receive_from_IP(self):
+        packet = TCPHeader()
+        begin = time.time()
+        while (time.time() - begin) < 1:
+            try:
+
 
     def tcp_close(self):
 
