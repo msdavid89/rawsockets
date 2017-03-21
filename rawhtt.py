@@ -51,7 +51,7 @@ class IPHeader:
         self.dst_ip = dst_ip
         self.payload = payload
 	self.ip_ihl_ver = (version << 4) + ihl
-	self.ip_header = pack('!BBHHHBBH4s4s' , self.ip_ihl_ver, self.tos, self.length, self.id, self.offset, self.ttl, self.proto, self.chksum, self.src_ip, self.dst_ip)
+	self.ip_header = struct.pack('!BBHHHBBH4s4s' , self.ip_ihl_ver, self.tos, self.length, self.id, self.offset, self.ttl, self.proto, self.chksum, self.src_ip, self.dst_ip)
 
     def gen_hdr_to_send(self):
 
