@@ -44,6 +44,7 @@ class IPHeader:
 
 
 class IPHandler:
+    """Handles all IP layer operations"""
 
     def __init__(self):
         try:
@@ -98,6 +99,7 @@ class TCPHeader:
 
 
 class TCPHandler:
+    """Manages all TCP operations"""
 
     def __init__(self):
         self.sock = IPHandler()
@@ -105,6 +107,10 @@ class TCPHandler:
         self.remote_port = ""
         self.local_ip = ""
         self.local_port = ""
+        self.seq_num = 0
+        self.ack_num = 0
+        self.total_acked = 0
+        self.cwnd = 1
 
     def tcp_connect(self, dst, port=80):
         """This function establishes the initial TCP connection with the remote server
@@ -129,7 +135,16 @@ class TCPHandler:
         return open_port
 
 
-    def send(self):
+    def send(self, payload):
+        """Ensures reliable, in-order delivery of all the data to be sent"""
+
+
+    def pass_to_IP(self, payload):
+        """Wrapper that passes TCP payload data down to IP layer"""
+        try:
+            self.sock.send(payload)
+        except:
+            print("Error: Failed to send at IP Layer")
 
     def tcp_close(self):
 
