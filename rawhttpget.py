@@ -107,14 +107,21 @@ class TCPHandler:
         self.local_port = ""
 
     def tcp_connect(self, dst, port=80):
+        """This function establishes the initial TCP connection with the remote server
+            and performs the three-way handshake."""
+
+        #Update the IPHandler with our remote/local IP addresses
         self.remote_ip = self.sock.gethostbyname(dst)
         self.remote_port = port
         self.local_ip = self.sock.getsockname()
         self.local_port = self.bind_to_open_port()
         self.sock = IPHandler(self.local_ip, self.remote_ip)
 
+        #Three-Way Handshake
+
 
     def bind_to_open_port(self):
+        """TCP needs an open port from the OS to bind our 'rawhttpget' application to."""
         test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         test_sock.bind(('',0))
         open_port = test_sock.getsockname()[1]
@@ -141,6 +148,7 @@ class TCPHandler:
 
 
 class RawGet:
+    """This class handles the HTTP protocol"""
 
     def __init__(self, url):
         self.sock = TCPHandler()
@@ -155,6 +163,7 @@ class RawGet:
 
 
     def start(self):
+        """The entrypoint for the application."""
         self.host, self.path = self.handle_url()
         self.request = "GET " + path + " HTTP/1.1\r\n" + "Host: " + host + "\r\nConnection: keep-alive\r\n\r\n"
         self.html_file = open(self.file_name, "wb+")
@@ -162,6 +171,8 @@ class RawGet:
 
 
     def handle_url(self):
+        """Parse the URL from the command line into a hostname and path for the remote file we want to
+            download with an HTTP GET"""
         if "http://" not in self.url:
             self.url = "http://" + self.url
         host = urlparse(self.url)
@@ -173,6 +184,8 @@ class RawGet:
         return hostname, path
 
     def handle_connection(self):
+        """This is a handler for our application's interface with the TCP protocol. It establishes the connection,
+            sends our HTTP payload, and receives the response."""
         try:
             self.sock.tcp_connect(self.host, 80)
             self.pass_to_tcp(self)
@@ -186,6 +199,7 @@ class RawGet:
 
 
     def pass_to_tcp(self):
+        """Wrapper for sending the HTTP GET request down to the TCP layer"""
         try:
             self.sock.send(self.request)
         except socket.error:
@@ -193,6 +207,8 @@ class RawGet:
 
 
     def recv_from_tcp(self):
+        """Receives and unpacks the data returned from the server through the TCP layer, and then
+            writes the data to our HTML file."""
 
 
 
