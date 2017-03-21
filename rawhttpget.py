@@ -6,6 +6,17 @@ import struct
 import random
 
 
+def checksum(msg):
+    s = 0
+    for i in range(0, len(msg), 2):
+        w = ord(msg[i]) + (ord(msg[i + 1]) << 8)
+        s = s + w
+    s = (s >> 16) + (s & 0xffff)
+    s = s + (s >> 16)
+    s = ~s & 0xffff
+    return s
+
+
 class IPHeader:
     """
      0                   1                   2                   3
@@ -48,7 +59,6 @@ class IPHeader:
 
     def verify_ip_hdr(self):
 
-    def ip_checksum(self):
 
 
 
@@ -97,6 +107,7 @@ class TCPHeader:
         self.seq_no = 0
         self.ack_no = 0
         self.offset = 5
+        self.offset_reserved = (self.offset << 4) + 0
         self.urg = 0
         self.psh = 0
         self.ack = 0
@@ -105,11 +116,14 @@ class TCPHeader:
         self.fin = 0
         self.wnd = 4096
         self.check = 0
-        self.urgent = 0
+        self.flags = self.fin + (self.syn << 1) + (self.rst << 2) + (self.psh << 3) + (self.ack << 4) + (self.urg << 5)
+        self.urg_ptr = 0
         self.data = payload
 
+        self.tcp_header = pack('!HHLLBBHHH', self.src_port, self.dst_port, self.seq_no, self.ack_no, self.offset_reserved, self.flags, self.wnd, self.check, self.urg_ptr)
 
-    def gen_hdr_to_send(self):
+
+    def gen_hdr_to_send(self, src_ip, dst_ip, ):
 
 
     def gen_pseudohdr(self):
@@ -120,15 +134,7 @@ class TCPHeader:
 
     def verify_tcp_hdr(self):
 
-    def tcp_checksum(self, msg):
-        s = 0
-        for i in range(0, len(msg), 2):
-            w = ord(msg[i]) + (ord(msg[i + 1]) << 8)
-            s = s + w
-        s = (s >> 16) + (s & 0xffff)
-        s = s + (s >> 16)
-        s = ~s & 0xffff
-        return s
+
 
 
 class TCPHandler:
