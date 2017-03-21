@@ -101,7 +101,7 @@ class TCPHeader:
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     """
 
-    def __init__(self, src_port=0, dst_port=80, payload=""):
+    def __init__(self, src_ip="", dst_ip="", src_port=0, dst_port=80, payload=""):
         self.src_port = src_port
         self.dst_port = dst_port
         self.seq_no = 0
@@ -120,14 +120,37 @@ class TCPHeader:
         self.urg_ptr = 0
         self.data = payload
 
-        self.tcp_header = pack('!HHLLBBHHH', self.src_port, self.dst_port, self.seq_no, self.ack_no, self.offset_reserved, self.flags, self.wnd, self.check, self.urg_ptr)
+        self.tcp_header = struct.pack('!HHLLBBHHH', self.src_port, self.dst_port, self.seq_no, self.ack_no, self.offset_reserved, self.flags, self.wnd, self.check, self.urg_ptr)
+        self.src_ip = src_ip
+        self.dst_ip = dst_ip
+        self.pseudo = self.gen_pseudohdr()
 
 
-    def gen_hdr_to_send(self, src_ip, dst_ip, ):
+    def gen_hdr_to_send(self, flags, seq_num, ack_num):
+        """Update the TCP header that gets passed to IP for sending"""
+        if flags == "syn": self.syn = 1
+        if flags == "ack": self.ack = 1
+        if flags == "rst": self.rst = 1
+        if flags == "fin,ack":
+            self.fin = 1
+            self.ack = 1
+        self.flags = self.fin + (self.syn << 1) + (self.rst << 2) + (self.psh << 3) + (self.ack << 4) + (self.urg << 5)
+        self.seq_no = seq_num
+        self.ack_no = ack_num
+        self.tcp_header = struct.pack('!HHLLBBHHH', self.src_port, self.dst_port, self.seq_no, self.ack_no, self.offset_reserved, self.flags, self.wnd, self.check, self.urg_ptr)
+        self.gen_pseudohdr()
+        self.check = checksum(self.pseudo + self.tcp_header + self.data)
+
+        #Assemble final header, finally!
+        self.tcp_header = struct.pack('!HHLLBBHHH', self.src_port, self.dst_port, self.seq_no, self.ack_no, self.offset_reserved, self.flags, self.wnd, self.check, self.urg_ptr)
+
 
 
     def gen_pseudohdr(self):
-
+        """Update the TCP 'pseudoheader' to be used in checksum"""
+        src_addr = socket.inet_aton(self.src_ip)
+        dst_addr = socket.inet_aton(self.dst_ip)
+        self.pseudo = struct.pack("!4s4sBBH", src_addr, dst_addr, 0, socket.IPPROTO_TCP, self.offset * 4 + len(self.data))
 
     def parse_hdr(self):
 
