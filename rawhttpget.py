@@ -25,7 +25,7 @@ class IPHeader:
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     """
 
-    def __init__(self):
+    def __init__(self, src_ip="", dst_ip="", payload=""):
         self.version = 4
         self.ihl = 5
         self.tos = 0
@@ -36,9 +36,9 @@ class IPHeader:
         self.ttl = 0
         self.proto = socket.IPPROTO_TCP
         self.chksum = 0
-        self.src = 0
-        self.dst = 0
-        self.data = ""
+        self.src_ip = src_ip
+        self.dst_ip = dst_ip
+        self.payload = payload
 
 
 
@@ -77,7 +77,24 @@ class TCPHeader:
 |   .... data ....                                              |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     """
-    def __init__(self):
+
+    def __init__(self, src_port=0, dst_port=80, payload=""):
+        self.src_port = src_port
+        self.dst_port = dst_port
+        self.seq_no = 0
+        self.ack_no = 0
+        self.offset = 5
+        self.urg = 0
+        self.psh = 0
+        self.ack = 0
+        self.rst = 0
+        self.syn = 0
+        self.fin = 0
+        self.wnd = 4096
+        self.check = 0
+        self.urgent = 0
+        self.data = payload
+
 
 
 class TCPHandler:
@@ -89,16 +106,38 @@ class TCPHandler:
         self.local_ip = ""
         self.local_port = ""
 
-    def tcp_connect(self, dst, port="80"):
+    def tcp_connect(self, dst, port=80):
         self.remote_ip = self.sock.gethostbyname(dst)
         self.remote_port = port
         self.local_ip = self.sock.getsockname()
-        self.local_port =
+        self.local_port = self.bind_to_open_port()
+        self.sock = IPHandler(self.local_ip, self.remote_ip)
+
+
+    def bind_to_open_port(self):
+        test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        test_sock.bind(('',0))
+        open_port = test_sock.getsockname()[1]
+        test_sock.close()
+        return open_port
 
 
     def send(self):
 
     def tcp_close(self):
+
+
+    def tcp_checksum(self, msg):
+        s = 0
+        for i in range(0, len(msg), 2):
+            w = ord(msg[i]) + (ord(msg[i + 1]) << 8)
+            s = s + w
+        s = (s >> 16) + (s & 0xffff)
+        s = s + (s >> 16)
+        s = ~s & 0xffff
+        return s
+
+
 
 
 class RawGet:
