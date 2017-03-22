@@ -142,6 +142,12 @@ class TCPHeader:
 
     def gen_hdr_to_send(self, flags, seq_num, ack_num):
         """Update the TCP header that gets passed to IP for sending"""
+        self.urg = 0
+        self.psh = 0
+        self.ack = 0
+        self.rst = 0
+        self.syn = 0
+        self.fin = 0
         flag_list = flags.split(",")
         if "syn" in flag_list: self.syn = 1
         if "ack" in flag_list: self.ack = 1
@@ -198,7 +204,6 @@ class TCPHandler:
         self.local_port = ""
         self.seq_num = 0
         self.ack_num = 0
-        self.acked = 0
         self.cwnd = 1
         self.adv_wnd = 1
         self.timed_out = 0 #Set to 1 when an RTO has occurred
@@ -317,14 +322,18 @@ class TCPHandler:
 
 
 
+
+########################## Maybe unnecessary, try to handle everything from the send function, then return the result up to HTTP layer?
     def recv(self):
         """Accumulates and keeps track of data received so it can be passed up to application layer."""
         packet = TCPHeader()
         data_received = ""
         while True:
 
-
         return data_received
+############################3
+
+
 
     def tcp_close(self):
         """Close the TCP connection. Handle case when server tries to shut connection down first as well."""
