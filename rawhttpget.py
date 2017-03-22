@@ -199,9 +199,9 @@ class TCPHandler:
     def __init__(self):
         self.sock = IPHandler()
         self.remote_ip = ""
-        self.remote_port = ""
+        self.remote_port = -1
         self.local_ip = ""
-        self.local_port = ""
+        self.local_port = -1
         self.seq_num = 0
         self.ack_num = 0
         self.cwnd = 1
@@ -230,7 +230,7 @@ class TCPHandler:
         synack = self.receive_from_IP()
         begin = time.time()
         while (time.time() - begin) < 5:
-            if self.timed_out == 1 or self.checksum_failed == 1:
+            if self.timed_out == 1 or synack.bad_packet == 1:
                 # Handle failure
                 self.cwnd = 1
                 self.pass_to_IP(syn_packet)
@@ -299,7 +299,10 @@ class TCPHandler:
         TODO: Divide payload into properly sized chunks. Flow control. Congestion avoidance.
         """
 
-        packet = TCPHeader(self.src_ip, self.dst_ip, self.local_port, self.remote_port, payload)
+        rcvd_packs = {}
+        rcvd_msg = {}
+
+        packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port, payload)
         to_send = packet.gen_hdr_to_send("syn,ack", self.seq_num, self.ack_num)
         self.pass_to_IP(to_send)
 
@@ -319,19 +322,6 @@ class TCPHandler:
         else:
             self.cwnd = self.cwnd - 1
             self.pass_to_IP(to_send)
-
-
-
-
-########################## Maybe unnecessary, try to handle everything from the send function, then return the result up to HTTP layer?
-    def recv(self):
-        """Accumulates and keeps track of data received so it can be passed up to application layer."""
-        packet = TCPHeader()
-        data_received = ""
-        while True:
-
-        return data_received
-############################3
 
 
 
@@ -386,11 +376,11 @@ class RawGet:
             sends our HTTP payload, and receives the response."""
         try:
             self.sock.tcp_connect(self.host, 80)
-            self.pass_to_tcp(self)
-            received = self.recv_from_tcp()
+            received = self.pass_to_tcp(self)
         except:
             sys.exit("Error!")
         if received:
+            self.parse_http(received)
             self.html_file.write(received)
         finally:
             self.sock.tcp_close()
@@ -398,13 +388,14 @@ class RawGet:
 
     def pass_to_tcp(self):
         """Wrapper for sending the HTTP GET request down to the TCP layer"""
+        data = ""
         try:
-            self.sock.send(self.request)
+            data = self.sock.send(self.request)
         except socket.error:
             sys.exit("Error while sending.")
+        return data
 
-
-    def recv_from_tcp(self):
+    def parse_http(self, data):
         """Receives and unpacks the data returned from the server through the TCP layer, and then
             writes the data to our HTML file."""
 
