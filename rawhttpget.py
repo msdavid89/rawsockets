@@ -141,13 +141,15 @@ class TCPHeader:
 
     def gen_hdr_to_send(self, flags, seq_num, ack_num):
         """Update the TCP header that gets passed to IP for sending"""
-        if flags == "syn": self.syn = 1
-        if flags == "ack": self.ack = 1
-        if flags == "rst": self.rst = 1
-        if flags == "fin,ack":
-            self.fin = 1
-            self.ack = 1
+        flag_list = flags.split(",")
+        if "syn" in flag_list: self.syn = 1
+        if "ack" in flag_list: self.ack = 1
+        if "rst" in flag_list: self.rst = 1
+        if "fin" in flag_list: self.fin = 1
+        #if "psh" in flag_list: self.psh = 1
+        #if "urg" in flag_list: self.urg = 1
         self.flags = self.fin + (self.syn << 1) + (self.rst << 2) + (self.psh << 3) + (self.ack << 4) + (self.urg << 5)
+        self.wnd = 65535
         self.seq_no = seq_num
         self.ack_no = ack_num
         self.tcp_header = struct.pack('!HHLLBBHHH', self.src_port, self.dst_port, self.seq_no, self.ack_no, self.offset_reserved, self.flags, self.wnd, self.check, self.urg_ptr)
@@ -184,7 +186,7 @@ class TCPHandler:
         self.local_port = ""
         self.seq_num = 0
         self.ack_num = 0
-        self.total_acked = 0
+        self.acked = 0
         self.cwnd = 1
 
     def tcp_connect(self, dst, port=80):
@@ -214,11 +216,6 @@ class TCPHandler:
         test_sock.close()
         return open_port
 
-
-    def send(self, payload):
-        """Ensures reliable, in-order delivery of all the data to be sent"""
-
-
     def pass_to_IP(self, payload):
         """Wrapper that passes TCP payload data down to IP layer"""
         try:
@@ -226,7 +223,6 @@ class TCPHandler:
         except:
             print("Error: Failed to send at IP Layer")
 
-    def receive(self):
 
     def receive_from_IP(self):
         """Interface for accepting a packet from the network layer and generating a TCP header/data from it."""
@@ -252,7 +248,28 @@ class TCPHandler:
 
     def rto_timeout(self):
 
+
+    def send(self, payload):
+        """Ensures reliable, in-order delivery of all the data to be sent
+
+        TODO: Divide payload into properly sized chunks."""
+
+        packet = TCPHeader(self.src_ip, self.dst_ip, self.local_port, self.remote_port, payload)
+        to_send = packet.gen_hdr_to_send("syn,ack", self.seq_num, self.ack_num)
+
+
+
+
+    def receive(self):
+        """Accumulates and keeps track of data received so it can be passed up to application layer."""
+        packet = TCPHeader()
+        data_received = ""
+
+
+        return data_received
+
     def tcp_close(self):
+        """Close the TCP connection. Handle case when server tries to shut connection down first as well."""
 
 
 ########################################################################################################
