@@ -137,6 +137,7 @@ class TCPHeader:
         self.src_ip = src_ip
         self.dst_ip = dst_ip
         self.pseudo = self.gen_pseudohdr()
+        self.bad_packet = 0
 
 
     def gen_hdr_to_send(self, flags, seq_num, ack_num):
@@ -168,10 +169,21 @@ class TCPHeader:
         self.pseudo = struct.pack("!4s4sBBH", src_addr, dst_addr, 0, socket.IPPROTO_TCP, self.offset * 4 + len(self.data))
 
     def parse(self, packet):
+        #Get TCP packet information from incoming packet
+        self.src_port, self.dst_port, self.seq_no, self.ack_no, off, flags, self.wnd, self.check, self.urg_ptr = struct.unpack("!HHLLBBHHH", packet[0:20])
+        self.offset = off >> 4
+        self.fin = flags & 0x01
+        self.syn = (flags & 0x02) >> 1
+        self.rst = (flags & 0x04) >> 2
+        self.psh = (flags & 0x08) >> 3
+        self.ack = (flags & 0x10) >> 4
+        self.urg = (flags & 0x20) >> 5
+        self.data = packet[20:]
 
-
-    def verify_tcp(self):
-
+        #Verify
+        self.gen_pseudohdr()
+        if checksum(self.pseudo + packet) != 0:
+            self.bad_packet = 1
 
 
 
@@ -210,15 +222,16 @@ class TCPHandler:
         self.pass_to_IP(syn_packet)
 
         #Receive syn/ack packet - allow maximum of 5 seconds before giving up
+        synack = self.receive_from_IP()
         begin = time.time()
         while (time.time() - begin) < 5:
-            synack = self.receive_from_IP()
             if self.timed_out == 1 or self.checksum_failed == 1:
                 # Handle failure
                 self.cwnd = 1
                 self.pass_to_IP(syn_packet)
             else:
                 break
+            synack = self.receive_from_IP()
 
         if synack.syn == 1 and synack.ack == 1 and synack.ack_no == (self.seq_num + 1):
             #We've received the correct syn/ack packet for the handshake
@@ -272,6 +285,7 @@ class TCPHandler:
 
     def rto_timeout(self):
         self.timed_out = 1
+        self.cwnd = 1
 
 
     def send(self, payload):
@@ -286,7 +300,7 @@ class TCPHandler:
 
         #Wait for ACK of sent packet
         ack_packet = self.receive_from_IP()
-        if self.timed_out == 1 or self.checksum_failed == 1:
+        if self.timed_out == 1 or ack_packet.bad_packet == 1:
             #Handle errors and try again
             self.cwnd = 1
             self.pass_to_IP(to_send)
@@ -307,6 +321,7 @@ class TCPHandler:
         """Accumulates and keeps track of data received so it can be passed up to application layer."""
         packet = TCPHeader()
         data_received = ""
+        while True:
 
 
         return data_received
