@@ -55,8 +55,8 @@ class IPHeader:
         self.src_ip = src_ip
         self.dst_ip = dst_ip
         self.payload = payload
-	self.ip_ihl_ver = (version << 4) + ihl
-	self.ip_header = struct.pack('!BBHHHBBH4s4s' , self.ip_ihl_ver, self.tos, self.length, self.id, self.offset, self.ttl, self.proto, self.chksum, self.src_ip, self.dst_ip)
+	    self.ip_ihl_ver = (version << 4) + ihl
+	    self.ip_header = struct.pack('!BBHHHBBH4s4s' , self.ip_ihl_ver, self.tos, self.length, self.id, self.offset, self.ttl, self.proto, self.chksum, self.src_ip, self.dst_ip)
 
     def gen_hdr_to_send(self):
 
@@ -170,7 +170,7 @@ class TCPHeader:
     def parse(self, packet):
 
 
-    def verify_tcp_hdr(self):
+    def verify_tcp(self):
 
 
 
@@ -188,23 +188,26 @@ class TCPHandler:
         self.ack_num = 0
         self.acked = 0
         self.cwnd = 1
+        self.adv_wnd = 1
 
     def tcp_connect(self, dst, port=80):
         """This function establishes the initial TCP connection with the remote server
             and performs the three-way handshake."""
 
         #Update the IPHandler with our remote/local IP addresses
-        self.remote_ip = self.sock.gethostbyname(dst)
+        self.remote_ip = socket.gethostbyname(dst)
         self.remote_port = port
-        self.local_ip = self.sock.getsockname()
+        self.local_ip = self.sock.recvsock.getsockname()
         self.local_port = self.bind_to_open_port()
-        self.sock = IPHandler(self.local_ip, self.remote_ip)
+        #self.sock = IPHandler(self.local_ip, self.remote_ip)
 
         #Three-Way Handshake
         self.seq_num = randint(0,65535)
         packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port)
         syn_packet = packet.gen_hdr_to_send("syn", self.seq_num, self.ack_num)
         self.pass_to_IP(syn_packet)
+
+        #Receive syn/ack packet
 
 
 
@@ -235,8 +238,8 @@ class TCPHandler:
                 received = self.sock.recv()
             except:
                 continue
-            packet.src_ip = self.dst_ip
-            packet.dst_ip = self.src_ip
+            packet.src_ip = self.remote_ip
+            packet.dst_ip = self.local_ip
             packet.parse(received)
 
             #Only accept packets destined for our application's local port, from the server we expect
@@ -252,7 +255,7 @@ class TCPHandler:
     def send(self, payload):
         """Ensures reliable, in-order delivery of all the data to be sent
 
-        TODO: Divide payload into properly sized chunks."""
+        TODO: Divide payload into properly sized chunks. Flow control. Congestion avoidance."""
 
         packet = TCPHeader(self.src_ip, self.dst_ip, self.local_port, self.remote_port, payload)
         to_send = packet.gen_hdr_to_send("syn,ack", self.seq_num, self.ack_num)
