@@ -189,6 +189,8 @@ class TCPHandler:
         self.acked = 0
         self.cwnd = 1
         self.adv_wnd = 1
+        self.timed_out = 0 #Set to 1 when an RTO has occurred
+        self.checksum_failed = 0 #Set to 1 when the incoming packet is misformed
 
     def tcp_connect(self, dst, port=80):
         """This function establishes the initial TCP connection with the remote server
@@ -207,8 +209,27 @@ class TCPHandler:
         syn_packet = packet.gen_hdr_to_send("syn", self.seq_num, self.ack_num)
         self.pass_to_IP(syn_packet)
 
-        #Receive syn/ack packet
+        #Receive syn/ack packet - allow maximum of 5 seconds before giving up
+        begin = time.time()
+        while (time.time() - begin) < 5:
+            synack = self.receive_from_IP()
+            if self.timed_out == 1 or self.checksum_failed == 1:
+                # Handle failure
+                self.cwnd = 1
+                self.pass_to_IP(syn_packet)
+            else:
+                break
 
+        if synack.syn == 1 and synack.ack == 1 and synack.ack_no == (self.seq_num + 1):
+            #We've received the correct syn/ack packet for the handshake
+            self.seq_num = synack.ack_no
+            self.ack_num = synack.seq_no + 1
+            if self.cwnd < 1000:
+                self.cwnd = self.cwnd + 1
+
+        #Respond with ack packet to complete handshake
+        ack_packet = packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
+        self.pass_to_IP(ack_packet)
 
 
     def bind_to_open_port(self):
@@ -250,20 +271,39 @@ class TCPHandler:
         self.rto_timeout()
 
     def rto_timeout(self):
+        self.timed_out = 1
 
 
     def send(self, payload):
         """Ensures reliable, in-order delivery of all the data to be sent
 
-        TODO: Divide payload into properly sized chunks. Flow control. Congestion avoidance."""
+        TODO: Divide payload into properly sized chunks. Flow control. Congestion avoidance.
+        """
 
         packet = TCPHeader(self.src_ip, self.dst_ip, self.local_port, self.remote_port, payload)
         to_send = packet.gen_hdr_to_send("syn,ack", self.seq_num, self.ack_num)
+        self.pass_to_IP(to_send)
+
+        #Wait for ACK of sent packet
+        ack_packet = self.receive_from_IP()
+        if self.timed_out == 1 or self.checksum_failed == 1:
+            #Handle errors and try again
+            self.cwnd = 1
+            self.pass_to_IP(to_send)
+
+        #Check if the right packet has been acked
+        if ack_packet.ack_no == self.seq_num + len(payload):
+            self.seq_num = ack_packet.ack_no
+            self.ack_num = ack_packet.seq_no + len(ack_packet.data)
+            if self.cwnd < 1000:
+                self.cwnd = self.cwnd + 1
+        else:
+            self.cwnd = self.cwnd - 1
+            self.pass_to_IP(to_send)
 
 
 
-
-    def receive(self):
+    def recv(self):
         """Accumulates and keeps track of data received so it can be passed up to application layer."""
         packet = TCPHeader()
         data_received = ""
