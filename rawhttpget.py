@@ -159,7 +159,7 @@ class TCPHeader:
         dst_addr = socket.inet_aton(self.dst_ip)
         self.pseudo = struct.pack("!4s4sBBH", src_addr, dst_addr, 0, socket.IPPROTO_TCP, self.offset * 4 + len(self.data))
 
-    def parse_hdr(self):
+    def parse(self, packet):
 
 
     def verify_tcp_hdr(self):
@@ -223,11 +223,26 @@ class TCPHandler:
     def receive(self):
 
     def receive_from_IP(self):
-        packet = TCPHeader()
+        """Interface for accepting a packet from the network layer and generating a TCP header/data from it."""
         begin = time.time()
-        while (time.time() - begin) < 1:
-            try:
 
+        #Allow 1 second to receive a packet
+        while ((time.time() - begin) < 1):
+            packet = TCPHeader()
+            try:
+                received = self.sock.recv()
+            except:
+                continue
+            packet.src_ip = self.dst_ip
+            packet.dst_ip = self.src_ip
+            packet.parse(received)
+
+            #Only accept packets destined for our application's local port, from the server we expect
+            if packet.src_port == self.remote_port and packet.dst_port == self.local_port:
+                return packet
+
+        #If TCP doesn't receive an ACK within 1 second, handle RTO
+        self.rto_timeout()
 
     def tcp_close(self):
 
