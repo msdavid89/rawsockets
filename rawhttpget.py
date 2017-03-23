@@ -183,7 +183,9 @@ class TCPHeader:
 
     def parse(self, packet):
         #Get TCP packet information from incoming packet
-        self.src_port, self.dst_port, self.seq_no, self.ack_no, off, flags, self.wnd, self.check, self.urg_ptr = struct.unpack("!HHLLBBHHH", packet[0:20])
+        self.src_port, self.dst_port, self.seq_no, self.ack_no, off, flags, self.wnd = struct.unpack("!HHLLBBH", packet[0:16])
+        self.check = struct.unpack("H", packet[16:18])
+        self.urg_ptr = struct.unpack("!H", packet[18:20])
         self.offset = off >> 4
         self.fin = flags & 0x01
         self.syn = (flags & 0x02) >> 1
