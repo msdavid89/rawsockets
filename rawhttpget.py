@@ -154,8 +154,12 @@ class TCPHeader:
         flag_list = flags.split(",")
         if "syn" in flag_list: self.syn = 1
         if "ack" in flag_list: self.ack = 1
-        if "rst" in flag_list: self.rst = 1
-        if "fin" in flag_list: self.fin = 1
+        if "rst" in flag_list:
+            self.rst = 1
+            self.data = ""
+        if "fin" in flag_list:
+            self.fin = 1
+            self.data = ""
         #if "psh" in flag_list: self.psh = 1
         #if "urg" in flag_list: self.urg = 1
         self.flags = self.fin + (self.syn << 1) + (self.rst << 2) + (self.psh << 3) + (self.ack << 4) + (self.urg << 5)
@@ -229,17 +233,20 @@ class TCPHandler:
         syn_packet = packet.gen_hdr_to_send("syn", self.seq_num, self.ack_num)
         self.pass_to_IP(syn_packet)
 
-        #Receive syn/ack packet - allow maximum of 1 minute before giving up
-        synack = self.receive_from_IP()
-        begin = time.time()
-        while (time.time() - begin) < 60:
-            if self.timed_out == 1:
+        #Receive syn/ack packet, willing to make several attempts
+        connection_attempts = 0
+        while connection_attempts < 4:
+            synack = self.receive_from_IP()
+            if self.timed_out == 1 or synack.bad_packet == 1:
                 # Handle failure
+                connection_attempts = connection_attempts + 1
                 self.cwnd = 1
                 self.pass_to_IP(syn_packet)
             else:
                 break
-            synack = self.receive_from_IP()
+        if connection_attempts == 4:
+            print("Failed to establish connection.")
+            exit(1)
 
         if synack.syn == 1 and synack.ack == 1 and synack.ack_no == (self.seq_num + 1):
             #We've received the correct syn/ack packet for the handshake
@@ -264,6 +271,7 @@ class TCPHandler:
     def pass_to_IP(self, payload):
         """Wrapper that passes TCP payload data down to IP layer"""
         try:
+            self.timed_out = 0
             self.sock.send(payload)
         except:
             print("Error: Failed to send at IP Layer")
@@ -286,6 +294,7 @@ class TCPHandler:
 
             #Only accept packets destined for our application's local port, from the server we expect
             if packet.src_port == self.remote_port and packet.dst_port == self.local_port and packet.bad_packet == 0:
+                self.timed_out = 0
                 return packet
 
         #If TCP doesn't receive an ACK within 1 second, handle RTO
@@ -315,7 +324,7 @@ class TCPHandler:
                 self.pass_to_IP(to_send)
 
             #Close the connection if the server requests it. Currently closes if server requests reconnect
-            if (ack_packet.fin == 1 and ack_packet.ack == 1) or ack_packet.rst == 1:
+            if ack_packet.fin == 1 or ack_packet.rst == 1:
                 self.tcp_close(ack_packet)
 
             # Check if the right packet has been acked
@@ -325,18 +334,45 @@ class TCPHandler:
                 if self.cwnd < 1000:
                     self.cwnd = self.cwnd + 1
             else:
-                self.cwnd = self.cwnd - 1
+                self.cwnd = self.cwnd - 1 # ???
                 self.pass_to_IP(to_send)
 
 
 
 
 
-    def tcp_close(self, fin_packet=TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port)):
+    def tcp_close(self, packet=None):
         """Close the TCP connection. Default fin_packet is used when the client shuts down connection,
             otherwise the server's fin/ack packet is passed in."""
+        client_close = 0
 
+        #First, send FIN or FIN/ACK packet
+        if packet is None:
+            #Client requesting shutdown
+            client_close = 1
+            packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port)
+            fin_packet = packet.gen_hdr_to_send("fin", self.seq_num, self.ack_num)
+        else:
+            #Server requesting shutdown
+            fin_packet = packet.gen_hdr_to_send("fin,ack", self.seq_num, self.ack_num)
+        self.pass_to_IP(fin_packet)
 
+        #Next, wait for ACK
+        while True:
+            received = self.receive_from_IP()
+            if self.timed_out == 1 or received.bad_packet == 1:
+                self.cwnd = 1
+                self.pass_to_IP(fin_packet)
+            elif received.ack == 1 and received.ack_no == (self.seq_num + 1):
+                self.ack_num = received.seq_no + 1
+                self.seq_num = received.ack_no
+                break
+
+        if client_close == 1:
+            #Client still needs to send a final ACK before closing
+            last_ack = packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
+
+        self.sock.close()
 
 
 
