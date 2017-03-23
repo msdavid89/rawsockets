@@ -237,7 +237,7 @@ class TCPHandler:
         connection_attempts = 0
         while connection_attempts < 4:
             synack = self.receive_from_IP()
-            if self.timed_out == 1 or synack.bad_packet == 1:
+            if self.timed_out == 1:
                 # Handle failure
                 connection_attempts = connection_attempts + 1
                 self.cwnd = 1
@@ -308,7 +308,7 @@ class TCPHandler:
         TODO: Divide payload into properly sized chunks. Flow control (handle advertised window). Congestion avoidance.
         """
 
-        rcvd_packs = {}
+        rcvd_packs = [] #Packets that have been sent but not yet acked
         rcvd_msg = {}
 
         packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port, payload)
@@ -316,8 +316,8 @@ class TCPHandler:
         self.pass_to_IP(to_send)
 
         #Wait for ACK of sent packet
-        ack_packet = self.receive_from_IP()
         while True:
+            ack_packet = self.receive_from_IP()
             if self.timed_out == 1:
                 # Handle errors and try again
                 self.cwnd = 1
@@ -360,7 +360,7 @@ class TCPHandler:
         #Next, wait for ACK
         while True:
             received = self.receive_from_IP()
-            if self.timed_out == 1 or received.bad_packet == 1:
+            if self.timed_out == 1:
                 self.cwnd = 1
                 self.pass_to_IP(fin_packet)
             elif received.ack == 1 and received.ack_no == (self.seq_num + 1):
