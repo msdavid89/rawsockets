@@ -7,3 +7,6 @@ Responsibilities
 ----------------------
 Michael:
 Oladipupo:
+
+
+Notes: Need to disable TCP checksum offloading to run in VM, configure iptables, etc.

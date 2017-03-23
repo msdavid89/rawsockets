@@ -85,6 +85,9 @@ class IPHandler:
 
     def recv(self):
 
+    def close(self):
+        self.sendsock.close()
+        self.recvsock.close()
 
 ########################################################################################################
 ################~~~~~~~~~~~~~~TCP (transport layer) API~~~~~~~~~~~~~~~~~~~~~~###########################
@@ -226,11 +229,11 @@ class TCPHandler:
         syn_packet = packet.gen_hdr_to_send("syn", self.seq_num, self.ack_num)
         self.pass_to_IP(syn_packet)
 
-        #Receive syn/ack packet - allow maximum of 5 seconds before giving up
+        #Receive syn/ack packet - allow maximum of 1 minute before giving up
         synack = self.receive_from_IP()
         begin = time.time()
-        while (time.time() - begin) < 5:
-            if self.timed_out == 1 or synack.bad_packet == 1:
+        while (time.time() - begin) < 60:
+            if self.timed_out == 1:
                 # Handle failure
                 self.cwnd = 1
                 self.pass_to_IP(syn_packet)
@@ -270,8 +273,8 @@ class TCPHandler:
         """Interface for accepting a packet from the network layer and generating a TCP header/data from it."""
         begin = time.time()
 
-        #Allow 1 second to receive a packet
-        while ((time.time() - begin) < 1):
+        #Allow 1 minute to receive a packet
+        while ((time.time() - begin) < 60):
             packet = TCPHeader()
             try:
                 received = self.sock.recv()
@@ -282,13 +285,10 @@ class TCPHandler:
             packet.parse(received)
 
             #Only accept packets destined for our application's local port, from the server we expect
-            if packet.src_port == self.remote_port and packet.dst_port == self.local_port:
+            if packet.src_port == self.remote_port and packet.dst_port == self.local_port and packet.bad_packet == 0:
                 return packet
 
         #If TCP doesn't receive an ACK within 1 second, handle RTO
-        self.rto_timeout()
-
-    def rto_timeout(self):
         self.timed_out = 1
         self.cwnd = 1
 
@@ -296,37 +296,48 @@ class TCPHandler:
     def send(self, payload):
         """Ensures reliable, in-order delivery of all the data to be sent
 
-        TODO: Divide payload into properly sized chunks. Flow control. Congestion avoidance.
+        TODO: Divide payload into properly sized chunks. Flow control (handle advertised window). Congestion avoidance.
         """
 
         rcvd_packs = {}
         rcvd_msg = {}
 
         packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port, payload)
-        to_send = packet.gen_hdr_to_send("syn,ack", self.seq_num, self.ack_num)
+        to_send = packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
         self.pass_to_IP(to_send)
 
         #Wait for ACK of sent packet
         ack_packet = self.receive_from_IP()
-        if self.timed_out == 1 or ack_packet.bad_packet == 1:
-            #Handle errors and try again
-            self.cwnd = 1
-            self.pass_to_IP(to_send)
+        while True:
+            if self.timed_out == 1:
+                # Handle errors and try again
+                self.cwnd = 1
+                self.pass_to_IP(to_send)
 
-        #Check if the right packet has been acked
-        if ack_packet.ack_no == self.seq_num + len(payload):
-            self.seq_num = ack_packet.ack_no
-            self.ack_num = ack_packet.seq_no + len(ack_packet.data)
-            if self.cwnd < 1000:
-                self.cwnd = self.cwnd + 1
-        else:
-            self.cwnd = self.cwnd - 1
-            self.pass_to_IP(to_send)
+            #Close the connection if the server requests it. Currently closes if server requests reconnect
+            if (ack_packet.fin == 1 and ack_packet.ack == 1) or ack_packet.rst == 1:
+                self.tcp_close(ack_packet)
+
+            # Check if the right packet has been acked
+            if ack_packet.ack_no == self.seq_num + len(payload):
+                self.seq_num = ack_packet.ack_no
+                self.ack_num = ack_packet.seq_no + len(ack_packet.data)
+                if self.cwnd < 1000:
+                    self.cwnd = self.cwnd + 1
+            else:
+                self.cwnd = self.cwnd - 1
+                self.pass_to_IP(to_send)
 
 
 
-    def tcp_close(self):
-        """Close the TCP connection. Handle case when server tries to shut connection down first as well."""
+
+
+    def tcp_close(self, fin_packet=TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port)):
+        """Close the TCP connection. Default fin_packet is used when the client shuts down connection,
+            otherwise the server's fin/ack packet is passed in."""
+
+
+
 
 
 ########################################################################################################
