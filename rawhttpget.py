@@ -170,8 +170,8 @@ class TCPHeader:
         self.gen_pseudohdr()
         self.check = checksum(self.pseudo + self.tcp_header + self.data)
 
-        #Assemble final header, finally!
-        self.tcp_header = struct.pack('!HHLLBBHHH', self.src_port, self.dst_port, self.seq_no, self.ack_no, self.offset_reserved, self.flags, self.wnd, self.check, self.urg_ptr)
+        #Assemble final header, finally! Checksum is NOT in network byte order.
+        self.tcp_header = struct.pack('!HHLLBBH', self.src_port, self.dst_port, self.seq_no, self.ack_no, self.offset_reserved, self.flags, self.wnd) + struct.pack("H", self.check) + struct.pack("!H", self.urg_ptr)
         return self.tcp_header + self.data
 
 
@@ -316,6 +316,10 @@ class TCPHandler:
         self.pass_to_IP(to_send)
 
         #Wait for ACK of sent packet
+        #If the ACK# is equal to current seq_num, ACK that packet and store the data.
+        #Else, send a duplicate ACK and store the data somewhere appropriate.
+        #TCP must continue listening until it receives every data packet it expects. Might require removing the
+        #Connection: keep-alive header from the HTTP GET message.
         while True:
             ack_packet = self.receive_from_IP()
             if self.timed_out == 1:
@@ -323,7 +327,7 @@ class TCPHandler:
                 self.cwnd = 1
                 self.pass_to_IP(to_send)
 
-            #Close the connection if the server requests it. Currently closes if server requests reconnect
+            #Close the connection if the server requests it. Currently closes if server requests reset
             if ack_packet.fin == 1 or ack_packet.rst == 1:
                 self.tcp_close(ack_packet)
 
