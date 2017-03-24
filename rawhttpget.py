@@ -56,16 +56,43 @@ class IPHeader:
         self.src_ip = src_ip
         self.dst_ip = dst_ip
         self.payload = payload
-        self.ip_ihl_ver = (version << 4) + ihl
-        self.ip_header = struct.pack('!BBHHHBBH4s4s' , self.ip_ihl_ver, self.tos, self.length, self.id, self.offset, self.ttl, self.proto, self.chksum, self.src_ip, self.dst_ip)
+        self.ip_ihl_ver = (self.version << 4) + self.ihl
+        self.ip_header = struct.pack('!BBHHHBBH4s4s', self.ip_ihl_ver, self.tos, self.length, self.id, self.offset, self.ttl, self.proto, self.chksum, self.src_ip, self.dst_ip)
+        self.bad_packet = 0
+
 
     def gen_hdr_to_send(self):
+        """Creates an IP header and prepends it to packet to send to server"""
+        self.id = randint(0,65535)
+        self.length = self.ihl * 4 + len(self.payload)
+        src_ip = socket.inet_aton(self.src_ip)
+        dst_ip = socket.inet_aton(self.dst_ip)
+        self.ip_header = struct.pack('!BBHHHBBH4s4s', self.ip_ihl_ver, self.tos, self.length, self.id, self.offset, self.ttl, self.proto, self.chksum, src_ip, dst_ip)
+        self.chksum = checksum(self.ip_header)
+        self.ip_header = struct.pack('!BBHHHBB', self.ip_ihl_ver, self.tos, self.length, self.id, self.offset, self.ttl, self.proto) + struct.pack('H', self.chksum) + struct.pack('!4s4s', src_ip, dst_ip)
 
-    def gen_pseudohdr(self):
+        return self.ip_header + self.payload
 
-    def parse_hdr(self):
+    def parse(self, packet):
+        """Parses the packet header passed in, after receiving from the network."""
+        header = packet[0:20]
+        self.ip_ihl_ver, self.tos, self.length, self.id, flag_off, self.ttl, self.proto = struct.unpack('!BBHHHBB', header[0:10])
+        self.chksum = struct.unpack('H', header[10:12])
+        src_ip, dst_ip = struct.unpack('!4s4s', header[12:20])
+        self.version = self.ip_ihl_ver >> 4
+        self.ihl = self.ip_ihl_ver & 0x0f
 
-    def verify_ip_hdr(self):
+        #Not sure if flags or offset matter
+        self.flags = 0
+        self.offset = 0
+
+        self.src_ip = socket.inet_ntoa(src_ip)
+        self.dst_ip = socket.inet_ntoa(dst_ip)
+
+        self.payload = packet[20:]
+
+        if checksum(header) != 0:
+            self.bad_packet = 1
 
 
 
@@ -74,18 +101,52 @@ class IPHandler:
     """Handles all IP layer operations"""
 
     def __init__(self):
+        self.src_addr = ""
+        self.dst_addr = ""
+        self.src_port = -1
+        self.dst_port = -1
+        self.sendsock = -1
+        self.recvsock = -1
+
+
+    def update_addr_info(self, src_ip="", dst_ip="", src_port=0, dst_port=80):
+        self.src_addr = src_ip
+        self.dst_addr = dst_ip
+        self.src_port = src_port
+        self.dst_port = dst_port
         try:
             self.sendsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
             self.recvsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
             self.recvsock.setblocking(0)
         except socket.error:
-            print("Failed to create socket. Womp womp.")
+            print("Failed to create sockets. Womp womp.")
             sys.exit()
 
 
     def send(self, payload):
+        packet = IPHeader(self.src_addr, self.dst_addr, payload)
+        to_send = packet.gen_hdr_to_send()
+        try:
+            self.sendsock.sendall(to_send)
+        except:
+            print("Error sending over network.")
+            sys.exit(1)
+
 
     def recv(self):
+        while True:
+            packet = IPHeader()
+            try:
+                received = self.recvsock.recvall()
+            except:
+                print("Error while receiving IP packet.")
+                sys.exit(1)
+            packet.parse(received)
+
+            if packet.proto == socket.IPPROTO_TCP and packet.src_ip == self.src_addr and packet.dst_ip == self.dst_addr and packet.bad_packet == 0:
+                return packet.payload
+
+
 
     def close(self):
         self.sendsock.close()
@@ -234,6 +295,7 @@ class TCPHandler:
         self.remote_port = port
         self.local_ip = self.sock.recvsock.getsockname()
         self.local_port = self.bind_to_open_port()
+        self.sock.update_addr_info(self.local_ip, self.remote_ip, self.local_port, self.remote_port)
 
         #Three-Way Handshake
         self.seq_num = randint(0,65535)
@@ -254,7 +316,7 @@ class TCPHandler:
                 break
         if connection_attempts == 4:
             print("Failed to establish connection.")
-            exit(1)
+            sys.exit(1)
 
         if synack.syn == 1 and synack.ack == 1 and synack.ack_no == (self.seq_num + 1):
             #We've received the correct syn/ack packet for the handshake
@@ -510,14 +572,14 @@ class RawGet:
             index = data.index("\r\n\r\n") + 4
         except:
             print("Didn't receive proper HTML data.")
-            exit(1)
+            sys.exit(1)
 
         header = data[:index]
         body = data[index:]
 
         if "HTTP/1.1 200" not in header:
             print("HTML didn't return 200 code, error.")
-            exit(1)
+            sys.exit(1)
 
         if "Transfer-Encoding: chunked" not in header:
             pos = header.find("Content-Length: ") + 17
