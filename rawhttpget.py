@@ -1,3 +1,4 @@
+#!usr/bin/python
 import argparse
 import sys
 from urlparse import urlparse
@@ -76,6 +77,7 @@ class IPHandler:
         try:
             self.sendsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
             self.recvsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
+            self.recvsock.setblocking(0)
         except socket.error:
             print("Failed to create socket. Womp womp.")
             sys.exit()
@@ -141,6 +143,8 @@ class TCPHeader:
         self.dst_ip = dst_ip
         self.pseudo = self.gen_pseudohdr()
         self.bad_packet = 0
+
+
 
 
     def gen_hdr_to_send(self, flags, seq_num, ack_num):
@@ -213,10 +217,12 @@ class TCPHandler:
         self.local_port = -1
         self.seq_num = 0
         self.ack_num = 0
+        #self.next_ack = 0
+        self.last_acked = 0
         self.cwnd = 1
         self.adv_wnd = 1
         self.timed_out = 0 #Set to 1 when an RTO has occurred
-        self.checksum_failed = 0 #Set to 1 when the incoming packet is misformed
+        self.max_packs = min(self.cwnd, self.adv_wnd)
 
     def tcp_connect(self, dst, port=80):
         """This function establishes the initial TCP connection with the remote server
@@ -227,7 +233,6 @@ class TCPHandler:
         self.remote_port = port
         self.local_ip = self.sock.recvsock.getsockname()
         self.local_port = self.bind_to_open_port()
-        #self.sock = IPHandler(self.local_ip, self.remote_ip)
 
         #Three-Way Handshake
         self.seq_num = randint(0,65535)
@@ -254,6 +259,7 @@ class TCPHandler:
             #We've received the correct syn/ack packet for the handshake
             self.seq_num = synack.ack_no
             self.ack_num = synack.seq_no + 1
+            self.adv_wnd = synack.wnd
             if self.cwnd < 1000:
                 self.cwnd = self.cwnd + 1
 
@@ -310,41 +316,71 @@ class TCPHandler:
         TODO: Divide payload into properly sized chunks. Flow control (handle advertised window). Congestion avoidance.
         """
 
-        rcvd_packs = [] #Packets that have been sent but not yet acked
-        rcvd_msg = {}
-
         packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port, payload)
         to_send = packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
         self.pass_to_IP(to_send)
 
+        rcvd_packs = {}
+        to_ack = []            #Stores list of sequence numbers received which we haven't acked yet
+        rcvd_data = ''
+
         #Wait for ACK of sent packet
-        #If the ACK# is equal to current seq_num, ACK that packet and store the data.
-        #Else, send a duplicate ACK and store the data somewhere appropriate.
-        #TCP must continue listening until it receives every data packet it expects. Might require removing the
-        #Connection: keep-alive header from the HTTP GET message.
-        while True:
+        begin = time.time()
+        while time.time() - begin < 180:
             ack_packet = self.receive_from_IP()
             if self.timed_out == 1:
                 # Handle errors and try again
                 self.cwnd = 1
                 self.pass_to_IP(to_send)
 
-            #Close the connection if the server requests it. Currently closes if server requests reset
-            if ack_packet.fin == 1 or ack_packet.rst == 1:
-                self.tcp_close(ack_packet)
-
-            # Check if the right packet has been acked
+            # Check if our HTTP GET packet has been acked
             if ack_packet.ack_no == self.seq_num + len(payload):
                 self.seq_num = ack_packet.ack_no
+                self.last_acked = self.seq_num
                 self.ack_num = ack_packet.seq_no + len(ack_packet.data)
                 if self.cwnd < 1000:
                     self.cwnd = self.cwnd + 1
+                break
             else:
-                self.cwnd = self.cwnd - 1 # ???
-                self.pass_to_IP(to_send)
+                #Our HTTP packet hasn't been acked, but we've received some legitimate packet out of order
+                rcvd_packs[ack_packet.seq_no] = ack_packet.data  # Adds the sequence # and payload data to dictionary
+                to_ack.append(ack_packet.seq_no)
+                self.pass_to_IP(to_send) # send duplicate ACK
+
+
+        #If the ACK# is equal to current seq_num, ACK that packet and store the data.
+        #Else, send a duplicate ACK and store the data somewhere appropriate.
+        my_packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port)
+        while True:
+            ack_packet = self.receive_from_IP()
+            if ack_packet is not None:
+                rcvd_packs[ack_packet.seq_no] = ack_packet.data # Adds the sequence # and payload data to dictionary
+
+                #Received packets up to date
+                if self.last_acked == ack_packet.seq_no:
+                    del to_ack[:]
+                    self.ack_num = ack_packet.seq_no
+                    self.last_acked = self.ack_num
+                    my_ack = my_packet.gen_hdr_to_send("ack", self.seq_num, ack_packet.seq_no)
+                    self.pass_to_IP(my_ack)
+                #Received duplicate packet from server, drop it
+                elif rcvd_packs.has_key(ack_packet.seq_no):
+                    pass
+                elif ack_packet.seq_no in to_ack:
+
+                else:
+                    to_ack.append(ack_packet.seq_no)
 
 
 
+
+
+            #Close the connection if the server requests it. Currently closes if server requests reset
+            ###########What if packets arrive out of order? This isn't quite good enough.#######################
+            if ack_packet.fin == 1 or ack_packet.rst == 1:
+                self.tcp_close(ack_packet)
+
+        return rcvd_data
 
 
     def tcp_close(self, packet=None):
@@ -404,9 +440,9 @@ class RawGet:
 
 
     def start(self):
-        """The entrypoint for the application."""
+        """The entry point for the application."""
         self.host, self.path = self.handle_url()
-        self.request = "GET " + path + " HTTP/1.1\r\n" + "Host: " + host + "\r\nConnection: keep-alive\r\n\r\n"
+        self.request = "GET " + path + " HTTP/1.1\r\n" + "Host: " + host + "\r\n\r\n"
         self.html_file = open(self.file_name, "wb+")
         self.handle_connection()
 
@@ -436,7 +472,7 @@ class RawGet:
             self.parse_http(received)
             self.html_file.write(received)
         finally:
-            self.sock.tcp_close()
+            self.sock.tcp_close() ######################Not Needed??????###################################
 
 
     def pass_to_tcp(self):
