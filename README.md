@@ -19,3 +19,4 @@ bytes, but substracting the IP/TCP headers it is only 28 bytes, and our payload 
 
 -We do not use Connection: keep-alive in our HTTP header. This allows us to detect when the server is finished sending
 the file simply by looking for a FIN packet.
+-Our implementation ACKs every packet received (except duplicates). It could be more efficient sending cumulative ACKs.

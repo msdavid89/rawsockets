@@ -56,8 +56,8 @@ class IPHeader:
         self.src_ip = src_ip
         self.dst_ip = dst_ip
         self.payload = payload
-	    self.ip_ihl_ver = (version << 4) + ihl
-	    self.ip_header = struct.pack('!BBHHHBBH4s4s' , self.ip_ihl_ver, self.tos, self.length, self.id, self.offset, self.ttl, self.proto, self.chksum, self.src_ip, self.dst_ip)
+        self.ip_ihl_ver = (version << 4) + ihl
+        self.ip_header = struct.pack('!BBHHHBBH4s4s' , self.ip_ihl_ver, self.tos, self.length, self.id, self.offset, self.ttl, self.proto, self.chksum, self.src_ip, self.dst_ip)
 
     def gen_hdr_to_send(self):
 
@@ -217,12 +217,13 @@ class TCPHandler:
         self.local_port = -1
         self.seq_num = 0
         self.ack_num = 0
-        #self.next_ack = 0
         self.last_acked = 0
+        self.received_fin = 0
         self.cwnd = 1
         self.adv_wnd = 1
         self.timed_out = 0 #Set to 1 when an RTO has occurred
         self.max_packs = min(self.cwnd, self.adv_wnd)
+        self.webpage = ''
 
     def tcp_connect(self, dst, port=80):
         """This function establishes the initial TCP connection with the remote server
@@ -320,9 +321,8 @@ class TCPHandler:
         to_send = packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
         self.pass_to_IP(to_send)
 
-        rcvd_packs = {}
+        rcvd_packs = {}        #Dictionary of sequence numbers received and the data associated with them
         to_ack = []            #Stores list of sequence numbers received which we haven't acked yet
-        rcvd_data = ''
 
         #Wait for ACK of sent packet
         begin = time.time()
@@ -348,17 +348,23 @@ class TCPHandler:
                 self.pass_to_IP(to_send) # send duplicate ACK
 
 
-        #If the ACK# is equal to current seq_num, ACK that packet and store the data.
-        #Else, send a duplicate ACK and store the data somewhere appropriate.
+        #This part handles the packets of data we receive from the server, including dealing with duplicates
+        #and packets arriving in the wrong order.
         my_packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port)
         while True:
             ack_packet = self.receive_from_IP()
             if ack_packet is not None:
                 rcvd_packs[ack_packet.seq_no] = ack_packet.data # Adds the sequence # and payload data to dictionary
 
-                #Received packets up to date
+                #Received packets that let me advance the sliding window by updating 'last_acked'
+                #This could be because we are up to date, or from catching a retransmission from the server.
                 if self.last_acked == ack_packet.seq_no:
-                    del to_ack[:]
+                    if ack_packet.seq_no in to_ack:
+                        #Catching up from retransmissions or out of order arrivals
+                        to_ack.remove(ack_packet.seq_no)
+                    else:
+                        #We are caught up and receiving packets in order
+                        del to_ack[:]
                     self.ack_num = ack_packet.seq_no
                     self.last_acked = self.ack_num
                     my_ack = my_packet.gen_hdr_to_send("ack", self.seq_num, ack_packet.seq_no)
@@ -366,21 +372,38 @@ class TCPHandler:
                 #Received duplicate packet from server, drop it
                 elif rcvd_packs.has_key(ack_packet.seq_no):
                     pass
-                elif ack_packet.seq_no in to_ack:
-
+                #Fallen behind/packets out of order;
                 else:
                     to_ack.append(ack_packet.seq_no)
+                    if my_ack:
+                        self.pass_to_IP(my_ack)
+                    else:
+                        #Still haven't received the first packet of data, but have received a later one
+                        self.pass_to_IP(to_send)
 
+                if ack_packet.fin == 1:
+                    self.received_fin = 1
 
+                #Closes socket if server requests reset
+                if ack_packet.rst == 1:
+                    self.tcp_close(ack_packet)
 
-
-
-            #Close the connection if the server requests it. Currently closes if server requests reset
-            ###########What if packets arrive out of order? This isn't quite good enough.#######################
-            if ack_packet.fin == 1 or ack_packet.rst == 1:
+            # Close the connection if the server requests it.
+            # Only closes when all packets have been received [when len(to_ack) == 0]
+            if self.received_fin == 1 and len(to_ack) == 0:
+                self.reorder_data(rcvd_packs)
                 self.tcp_close(ack_packet)
 
-        return rcvd_data
+
+    def reorder_data(self, packets):
+        """After receiving all the packets from the server, we need to put the data received in order for
+            easy access for HTTP"""
+        packet_list = packets.items()
+        packet_list.sort()
+        data_list = [x[1] for x in packet_list]
+        for d in data_list:
+            self.webpage = self.webpage + d
+
 
 
     def tcp_close(self, packet=None):
@@ -434,7 +457,6 @@ class RawGet:
         self.path = ""
         self.request = ""
         self.file_name = "index.html"
-        self.html_file = -1
         self.local_ip = ""
         self.remote_ip = ""
 
@@ -442,8 +464,7 @@ class RawGet:
     def start(self):
         """The entry point for the application."""
         self.host, self.path = self.handle_url()
-        self.request = "GET " + path + " HTTP/1.1\r\n" + "Host: " + host + "\r\n\r\n"
-        self.html_file = open(self.file_name, "wb+")
+        self.request = "GET " + self.path + " HTTP/1.1\r\n" + "Host: " + self.host + "\r\n\r\n"
         self.handle_connection()
 
 
@@ -465,28 +486,57 @@ class RawGet:
             sends our HTTP payload, and receives the response."""
         try:
             self.sock.tcp_connect(self.host, 80)
-            received = self.pass_to_tcp(self)
+            received = self.pass_to_tcp()
         except:
             sys.exit("Error!")
         if received:
-            self.parse_http(received)
-            self.html_file.write(received)
-        finally:
-            self.sock.tcp_close() ######################Not Needed??????###################################
+            html = self.parse_http(received)
+            html_file = open(self.file_name, "wb+")
+            html_file.write(html)
 
 
     def pass_to_tcp(self):
-        """Wrapper for sending the HTTP GET request down to the TCP layer"""
-        data = ""
+        """Wrapper for sending the HTTP GET request down to the TCP layer and retrieving the result"""
         try:
-            data = self.sock.send(self.request)
+            self.sock.send(self.request)
         except socket.error:
             sys.exit("Error while sending.")
-        return data
+        return self.sock.webpage
 
     def parse_http(self, data):
         """Receives and unpacks the data returned from the server through the TCP layer, and then
             writes the data to our HTML file."""
+        try:
+            index = data.index("\r\n\r\n") + 4
+        except:
+            print("Didn't receive proper HTML data.")
+            exit(1)
+
+        header = data[:index]
+        body = data[index:]
+
+        if "HTTP/1.1 200" not in header:
+            print("HTML didn't return 200 code, error.")
+            exit(1)
+
+        if "Transfer-Encoding: chunked" not in header:
+            pos = header.find("Content-Length: ") + 17
+            slen = ""
+            while header.isnum(pos):
+                slen = slen + header[pos]
+            length = int(slen)
+            return body[:length]
+        else:
+            #Chunked encoding, so return only the odd lines of the body until seeing "0"
+            page = ""
+            body_lines = body.split("\r\n")
+            line_num = 0
+            for l in body_lines:
+                if l == "0":
+                    return page
+                if line_num % 2 == 1:
+                    page = page + l
+
 
 
 
