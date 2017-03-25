@@ -109,14 +109,19 @@ class IPHandler:
         self.recvsock = -1
 
 
-    def update_addr_info(self, src_ip="", dst_ip="", src_port=0, dst_port=80):
-        self.src_addr = src_ip
+    def update_addr_info(self, dst_ip="", dst_port=80):
+        print("Here.")
+        #self.src_addr = src_ip
         self.dst_addr = dst_ip
-        self.src_port = src_port
+        #self.src_port = src_port
         self.dst_port = dst_port
         try:
             self.sendsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
             self.recvsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
+            self.recvsock.bind(('', 0))
+            self.src_addr = self.recvsock.getsockname()[0]
+            self.src_port = self.recvsock.getsockname()[1]
+            print("connected??")
             self.recvsock.setblocking(0)
         except socket.error:
             print("Failed to create sockets. Womp womp.")
@@ -289,13 +294,14 @@ class TCPHandler:
     def tcp_connect(self, dst, port=80):
         """This function establishes the initial TCP connection with the remote server
             and performs the three-way handshake."""
-
         #Update the IPHandler with our remote/local IP addresses
         self.remote_ip = socket.gethostbyname(dst)
         self.remote_port = port
-        self.local_ip = self.sock.recvsock.getsockname()
-        self.local_port = self.bind_to_open_port()
-        self.sock.update_addr_info(self.local_ip, self.remote_ip, self.local_port, self.remote_port)
+        #self.local_ip = self.sock.recvsock.getsockname()
+        #self.local_port = self.bind_to_open_port()
+        self.sock.update_addr_info(self.remote_ip, self.remote_port)
+        self.local_port = self.sock.src_port
+        self.local_ip = self.sock.src_addr
 
         #Three-Way Handshake
         self.seq_num = randint(0,65535)
@@ -560,7 +566,9 @@ class RawGet:
     def pass_to_tcp(self):
         """Wrapper for sending the HTTP GET request down to the TCP layer and retrieving the result"""
         try:
+            print("Request: " + self.request)
             self.sock.send(self.request)
+            print("Got back from send.")
         except socket.error:
             sys.exit("Error while sending.")
         return self.sock.webpage
