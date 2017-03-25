@@ -606,7 +606,7 @@ if __name__ == '__main__':
     if len(sys.argv) != 2:
         sys.exit("Usage: ./rawhttpget <URL>")
     parser = argparse.ArgumentParser(description='Project 4: Raw Sockets')
-    parser.add_argument('url', help='URL to use for raw socket communication.', required=True)
+    parser.add_argument('url', help='URL to use for raw socket communication.')
     args = parser.parse_args()
     rawget = RawGet(args.url)
     rawget.start()
