@@ -18,6 +18,12 @@ def checksum(msg):
     s = ~s & 0xffff
     return s
 
+def get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(("8.8.8.8", 80))
+    hostname = s.getsockname()[0]
+    s.close()
+    return hostname
 
 ########################################################################################################
 ################~~~~~~~~~~~~~~IP (network layer) API~~~~~~~~~~~~~~~~~~~~~~~~~###########################
@@ -110,21 +116,21 @@ class IPHandler:
 
 
     def update_addr_info(self, dst_ip="", dst_port=80):
-        print("Here.")
-        #self.src_addr = src_ip
         self.dst_addr = dst_ip
-        #self.src_port = src_port
         self.dst_port = dst_port
         try:
+            print("IP/port: " + self.dst_addr + ":" + str(self.dst_port))
             self.sendsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
             self.recvsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
-            self.recvsock.bind(('', 0))
-            self.src_addr = self.recvsock.getsockname()[0]
+            self.src_addr = get_local_ip()
+            self.recvsock.bind((self.src_addr, 0))
+            #self.recvsock.listen(1)
+            #self.src_addr = self.recvsock.getsockname()[0]
             self.src_port = self.recvsock.getsockname()[1]
-            print("connected??")
+            print("SRC IP:PORT: " + self.src_addr + ":" + str(self.src_port))
             self.recvsock.setblocking(0)
-        except socket.error:
-            print("Failed to create sockets. Womp womp.")
+        except socket.error, msg:
+            print("Failed to create sockets. Womp womp. " + str(msg[1]))
             sys.exit()
 
 
@@ -132,7 +138,7 @@ class IPHandler:
         packet = IPHeader(self.src_addr, self.dst_addr, payload)
         to_send = packet.gen_hdr_to_send()
         try:
-            self.sendsock.sendall(to_send)
+            self.sendsock.sendto(to_send, (self.dst_addr, self.dst_port))
         except:
             print("Error sending over network.")
             sys.exit(1)
@@ -294,11 +300,9 @@ class TCPHandler:
     def tcp_connect(self, dst, port=80):
         """This function establishes the initial TCP connection with the remote server
             and performs the three-way handshake."""
-        #Update the IPHandler with our remote/local IP addresses
+        #Update the IPHandler with our remote IP/Port
         self.remote_ip = socket.gethostbyname(dst)
         self.remote_port = port
-        #self.local_ip = self.sock.recvsock.getsockname()
-        #self.local_port = self.bind_to_open_port()
         self.sock.update_addr_info(self.remote_ip, self.remote_port)
         self.local_port = self.sock.src_port
         self.local_ip = self.sock.src_addr
@@ -350,6 +354,7 @@ class TCPHandler:
         try:
             self.timed_out = 0
             self.sock.send(payload)
+            print("Sent stuff.")
         except:
             print("Error: Failed to send at IP Layer")
 
