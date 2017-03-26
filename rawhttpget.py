@@ -81,10 +81,12 @@ class IPHeader:
 
     def parse(self, packet):
         """Parses the packet header passed in, after receiving from the network."""
-        print("attempting to parse")
         header = packet[0:20]
+        print("a")
         self.ip_ihl_ver, self.tos, self.length, self.id, flag_off, self.ttl, self.proto = struct.unpack('!BBHHHBB', header[0:10])
+        print("b")
         self.chksum = struct.unpack('H', header[10:12])
+        print("c")
         src_ip, dst_ip = struct.unpack('!4s4s', header[12:20])
         self.version = self.ip_ihl_ver >> 4
         self.ihl = self.ip_ihl_ver & 0x0f
@@ -94,6 +96,7 @@ class IPHeader:
         self.offset = 0
 
         self.src_ip = socket.inet_ntoa(src_ip)
+        print("d")
         self.dst_ip = socket.inet_ntoa(dst_ip)
 
         self.payload = packet[20:]
@@ -149,8 +152,7 @@ class IPHandler:
         while True:
             packet = IPHeader()
             try:
-                received = self.recvsock.recvall()
-                print("Recvall in IP.recv complete")
+                received = self.recvsock.recvfrom(65535)
             except:
                 print("Error while receiving IP packet.")
                 sys.exit(1)
