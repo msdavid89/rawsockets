@@ -6,6 +6,7 @@ import socket
 import struct
 from random import randint
 import time
+import signal
 
 
 def checksum(msg):
@@ -26,6 +27,7 @@ def get_local_ip():
     hostname = s.getsockname()[0]
     s.close()
     return hostname
+
 
 ########################################################################################################
 ################~~~~~~~~~~~~~~IP (network layer) API~~~~~~~~~~~~~~~~~~~~~~~~~###########################
@@ -120,7 +122,7 @@ class IPHandler:
         self.dst_addr = dst_ip
         self.dst_port = dst_port
         try:
-            print("IP/port: " + self.dst_addr + ":" + str(self.dst_port))
+            print("DST IP/port: " + self.dst_addr + ":" + str(self.dst_port))
             self.sendsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
             self.recvsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
             self.src_addr = get_local_ip()
@@ -236,7 +238,7 @@ class TCPHeader:
         if "fin" in flag_list:
             self.fin = 1
             self.data = ""
-        #if "psh" in flag_list: self.psh = 1
+        if "psh" in flag_list: self.psh = 1
         #if "urg" in flag_list: self.urg = 1
         self.flags = self.fin + (self.syn << 1) + (self.rst << 2) + (self.psh << 3) + (self.ack << 4) + (self.urg << 5)
         self.wnd = 65535
@@ -276,7 +278,6 @@ class TCPHeader:
         if checksum(self.pseudo + packet) != 0:
             self.bad_packet = 1
 
-        print("Bad packet: " + str(self.bad_packet) + " Checksum: " + str(self.check))
 
 
 class TCPHandler:
@@ -297,6 +298,7 @@ class TCPHandler:
         self.timed_out = 0 #Set to 1 when an RTO has occurred
         self.max_packs = min(self.cwnd, self.adv_wnd)
         self.webpage = ''
+        self.interrupted = 0
 
     def tcp_connect(self, dst, port=80):
         """This function establishes the initial TCP connection with the remote server
@@ -318,7 +320,6 @@ class TCPHandler:
         connection_attempts = 0
         while connection_attempts < 4:
             synack = self.receive_from_IP()
-            print("post-receive")
             if self.timed_out == 1:
                 # Handle failure
                 connection_attempts = connection_attempts + 1
@@ -348,7 +349,6 @@ class TCPHandler:
         try:
             self.timed_out = 0
             self.sock.send(payload)
-            print("Sent stuff.")
         except:
             print("Error: Failed to send at IP Layer")
 
@@ -361,7 +361,6 @@ class TCPHandler:
             packet = TCPHeader()
             try:
                 received = self.sock.recv()
-                print("aklsdjflkadjflks")
             except:
                 continue
             packet.src_ip = self.remote_ip
@@ -384,6 +383,10 @@ class TCPHandler:
         TODO: Divide payload into properly sized chunks. Flow control (handle advertised window). Congestion avoidance.
         """
 
+        #If we've made it to this point, there is a live TCP connection. If we need to interrupt the program,
+        #this signal handler will allow us to cleanly shut down the connection.
+        signal.signal(signal.SIGINT, self.handler)
+
         packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port, payload)
         to_send = packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
         self.pass_to_IP(to_send)
@@ -403,13 +406,16 @@ class TCPHandler:
             # Check if our HTTP GET packet has been acked
             if ack_packet.ack_no == self.seq_num + len(payload):
                 self.seq_num = ack_packet.ack_no
-                self.last_acked = self.seq_num
+                self.last_acked = ack_packet.seq_no
                 self.ack_num = ack_packet.seq_no + len(ack_packet.data)
+                print("LA: " + str(self.last_acked) + " self.ack_num: " + str(self.ack_num) + " self.seq_num: " + str(self.seq_num))
+                print("Received ACK: " + str(ack_packet.ack_no) + " Received SEQ: " + str(ack_packet.seq_no))
                 if self.cwnd < 1000:
                     self.cwnd = self.cwnd + 1
                 break
             else:
                 #Our HTTP packet hasn't been acked, but we've received some legitimate packet out of order
+                print("Early out of order?")
                 rcvd_packs[ack_packet.seq_no] = ack_packet.data  # Adds the sequence # and payload data to dictionary
                 to_ack.append(ack_packet.seq_no)
                 self.pass_to_IP(to_send) # send duplicate ACK
@@ -421,32 +427,38 @@ class TCPHandler:
         while True:
             ack_packet = self.receive_from_IP()
             if ack_packet is not None:
-                rcvd_packs[ack_packet.seq_no] = ack_packet.data # Adds the sequence # and payload data to dictionary
-
+                print("Last acked: " + str(self.last_acked) + " ACK: " + str(ack_packet.ack_no) + " Seq: " + str(ack_packet.seq_no))
                 #Received packets that let me advance the sliding window by updating 'last_acked'
                 #This could be because we are up to date, or from catching a retransmission from the server.
                 if self.last_acked == ack_packet.seq_no:
                     if ack_packet.seq_no in to_ack:
                         #Catching up from retransmissions or out of order arrivals
+                        print("Catching up.")
                         to_ack.remove(ack_packet.seq_no)
                     else:
                         #We are caught up and receiving packets in order
+                        print("Caught up, receiving in order.")
                         del to_ack[:]
-                    self.ack_num = ack_packet.seq_no
-                    self.last_acked = self.ack_num
-                    my_ack = my_packet.gen_hdr_to_send("ack", self.seq_num, ack_packet.seq_no)
+                    self.ack_num = ack_packet.seq_no + len(ack_packet.data)
+                    my_ack = my_packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
                     self.pass_to_IP(my_ack)
+                    self.last_acked = self.ack_num
                 #Received duplicate packet from server, drop it
                 elif rcvd_packs.has_key(ack_packet.seq_no):
+                    print("Drop duplicate packet.")
                     pass
                 #Fallen behind/packets out of order;
                 else:
                     to_ack.append(ack_packet.seq_no)
                     if my_ack:
+                        print("Packet out of order.")
                         self.pass_to_IP(my_ack)
                     else:
                         #Still haven't received the first packet of data, but have received a later one
                         self.pass_to_IP(to_send)
+
+                rcvd_packs[ack_packet.seq_no] = ack_packet.data # Adds the sequence # and payload data to dictionary
+
 
                 if ack_packet.fin == 1:
                     self.received_fin = 1
@@ -471,7 +483,11 @@ class TCPHandler:
         for d in data_list:
             self.webpage = self.webpage + d
 
-
+    def handler(self, signum, frame):
+        print("Gracefully close connection after receiving interrupt.")
+        self.interrupted = 1
+        self.tcp_close()
+        sys.exit(0)
 
     def tcp_close(self, packet=None):
         """Close the TCP connection. Default fin_packet is used when the client shuts down connection,
@@ -483,7 +499,13 @@ class TCPHandler:
             #Client requesting shutdown
             client_close = 1
             packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port)
-            fin_packet = packet.gen_hdr_to_send("fin", self.seq_num, self.ack_num)
+            if self.interrupted != 1:
+                fin_packet = packet.gen_hdr_to_send("fin", self.seq_num, self.ack_num)
+            else:
+                #In case user interrupts the program, reset connection
+                rst_packet = packet.gen_hdr_to_send("rst,ack", self.seq_num + 1, 0)
+                self.pass_to_IP(rst_packet)
+                sys.exit(0)
         else:
             #Server requesting shutdown
             fin_packet = packet.gen_hdr_to_send("fin,ack", self.seq_num, self.ack_num)
