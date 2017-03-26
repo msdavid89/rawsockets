@@ -9,6 +9,8 @@ import time
 
 
 def checksum(msg):
+    if len(msg) % 2 == 1:
+        msg = msg + struct.pack('B', 0)
     s = 0
     for i in range(0, len(msg), 2):
         w = ord(msg[i]) + (ord(msg[i + 1]) << 8)
@@ -48,7 +50,7 @@ class IPHeader:
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     """
 
-    def __init__(self, src_ip="", dst_ip="", payload=""):
+    def __init__(self, src_ip='', dst_ip='', payload=''):
         self.version = 4
         self.ihl = 5
         self.tos = 0
@@ -82,11 +84,8 @@ class IPHeader:
     def parse(self, packet):
         """Parses the packet header passed in, after receiving from the network."""
         header = packet[0:20]
-        print("a")
         self.ip_ihl_ver, self.tos, self.length, self.id, flag_off, self.ttl, self.proto = struct.unpack('!BBHHHBB', header[0:10])
-        print("b")
         self.chksum = struct.unpack('H', header[10:12])
-        print("c")
         src_ip, dst_ip = struct.unpack('!4s4s', header[12:20])
         self.version = self.ip_ihl_ver >> 4
         self.ihl = self.ip_ihl_ver & 0x0f
@@ -96,15 +95,12 @@ class IPHeader:
         self.offset = 0
 
         self.src_ip = socket.inet_ntoa(src_ip)
-        print("d")
         self.dst_ip = socket.inet_ntoa(dst_ip)
 
         self.payload = packet[20:]
 
         if checksum(header) != 0:
             self.bad_packet = 1
-
-        print("bad packet? " + str(self.bad_packet))
 
 
 
@@ -132,7 +128,6 @@ class IPHandler:
             #self.recvsock.listen(1)
             self.src_port = self.recvsock.getsockname()[1]
             print("SRC IP:PORT: " + self.src_addr + ":" + str(self.src_port))
-            #self.recvsock.setblocking(0)
         except socket.error, msg:
             print("Failed to create sockets. Womp womp. " + str(msg[1]))
             sys.exit()
@@ -152,14 +147,15 @@ class IPHandler:
         while True:
             packet = IPHeader()
             try:
-                received = self.recvsock.recvfrom(65535)
+                received, addr = self.recvsock.recvfrom(65535)
             except:
                 print("Error while receiving IP packet.")
                 sys.exit(1)
-            packet.parse(received)
+            if addr[0] == self.dst_addr:
+                packet.parse(received)
 
-            if packet.proto == socket.IPPROTO_TCP and packet.src_ip == self.src_addr and packet.dst_ip == self.dst_addr and packet.bad_packet == 0:
-                return packet.payload
+                if packet.proto == socket.IPPROTO_TCP and packet.src_ip == self.dst_addr and packet.dst_ip == self.src_addr and packet.bad_packet == 0:
+                    return packet.payload
 
 
 
@@ -273,7 +269,7 @@ class TCPHeader:
         self.psh = (flags & 0x08) >> 3
         self.ack = (flags & 0x10) >> 4
         self.urg = (flags & 0x20) >> 5
-        self.data = packet[20:]
+        self.data = packet[self.offset * 4:]
 
         #Verify
         self.gen_pseudohdr()
@@ -346,14 +342,6 @@ class TCPHandler:
         ack_packet = packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
         self.pass_to_IP(ack_packet)
 
-
-    def bind_to_open_port(self):
-        """TCP needs an open port from the OS to bind our 'rawhttpget' application to."""
-        test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        test_sock.bind(('',0))
-        open_port = test_sock.getsockname()[1]
-        test_sock.close()
-        return open_port
 
     def pass_to_IP(self, payload):
         """Wrapper that passes TCP payload data down to IP layer"""
