@@ -56,7 +56,7 @@ class IPHeader:
         self.id = 0
         self.flags = 0
         self.offset = 0
-        self.ttl = 0
+        self.ttl = 255
         self.proto = socket.IPPROTO_TCP
         self.chksum = 0
         self.src_ip = src_ip
@@ -81,6 +81,7 @@ class IPHeader:
 
     def parse(self, packet):
         """Parses the packet header passed in, after receiving from the network."""
+        print("attempting to parse")
         header = packet[0:20]
         self.ip_ihl_ver, self.tos, self.length, self.id, flag_off, self.ttl, self.proto = struct.unpack('!BBHHHBB', header[0:10])
         self.chksum = struct.unpack('H', header[10:12])
@@ -100,6 +101,7 @@ class IPHeader:
         if checksum(header) != 0:
             self.bad_packet = 1
 
+        print("bad packet? " + str(self.bad_packet))
 
 
 
@@ -125,10 +127,9 @@ class IPHandler:
             self.src_addr = get_local_ip()
             self.recvsock.bind((self.src_addr, 0))
             #self.recvsock.listen(1)
-            #self.src_addr = self.recvsock.getsockname()[0]
             self.src_port = self.recvsock.getsockname()[1]
             print("SRC IP:PORT: " + self.src_addr + ":" + str(self.src_port))
-            self.recvsock.setblocking(0)
+            #self.recvsock.setblocking(0)
         except socket.error, msg:
             print("Failed to create sockets. Womp womp. " + str(msg[1]))
             sys.exit()
@@ -149,6 +150,7 @@ class IPHandler:
             packet = IPHeader()
             try:
                 received = self.recvsock.recvall()
+                print("Recvall in IP.recv complete")
             except:
                 print("Error while receiving IP packet.")
                 sys.exit(1)
@@ -213,7 +215,7 @@ class TCPHeader:
         self.tcp_header = struct.pack('!HHLLBBHHH', self.src_port, self.dst_port, self.seq_no, self.ack_no, self.offset_reserved, self.flags, self.wnd, self.check, self.urg_ptr)
         self.src_ip = src_ip
         self.dst_ip = dst_ip
-        self.pseudo = self.gen_pseudohdr()
+        self.pseudo = 0
         self.bad_packet = 0
 
 
@@ -276,6 +278,7 @@ class TCPHeader:
         if checksum(self.pseudo + packet) != 0:
             self.bad_packet = 1
 
+        print("Bad packet: " + str(self.bad_packet) + " Checksum: " + str(self.check))
 
 
 class TCPHandler:
@@ -317,6 +320,7 @@ class TCPHandler:
         connection_attempts = 0
         while connection_attempts < 4:
             synack = self.receive_from_IP()
+            print("post-receive")
             if self.timed_out == 1:
                 # Handle failure
                 connection_attempts = connection_attempts + 1
@@ -362,12 +366,12 @@ class TCPHandler:
     def receive_from_IP(self):
         """Interface for accepting a packet from the network layer and generating a TCP header/data from it."""
         begin = time.time()
-
         #Allow 1 minute to receive a packet
         while ((time.time() - begin) < 60):
             packet = TCPHeader()
             try:
                 received = self.sock.recv()
+                print("aklsdjflkadjflks")
             except:
                 continue
             packet.src_ip = self.remote_ip
@@ -379,7 +383,7 @@ class TCPHandler:
                 self.timed_out = 0
                 return packet
 
-        #If TCP doesn't receive an ACK within 1 second, handle RTO
+        #If TCP doesn't receive an ACK within 60 seconds, handle RTO
         self.timed_out = 1
         self.cwnd = 1
 
