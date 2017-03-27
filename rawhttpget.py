@@ -161,6 +161,7 @@ class IPHandler:
 
 
     def close(self):
+        print("Final close code.")
         self.sendsock.close()
         self.recvsock.close()
 
@@ -321,7 +322,7 @@ class TCPHandler:
         connection_attempts = 0
         while connection_attempts < 4:
             synack = self.receive_from_IP()
-            if self.timed_out == 1:
+            if self.timed_out == 1 or synack.syn != 1 or synack.ack != 1 or synack.ack_no != (self.seq_num + 1):
                 # Handle failure
                 connection_attempts = connection_attempts + 1
                 self.cwnd = 1
@@ -427,8 +428,20 @@ class TCPHandler:
                     self.tcp_close(ack_packet)
                     sys.exit(1)
 
-                print("Last acked: " + str(self.last_acked) + " ACK: " + str(ack_packet.ack_no) + " Seq: " + str(ack_packet.seq_no))
-                print("To_ACK: " + str(to_ack))
+                if ack_packet.fin == 1:
+                    self.received_fin = 1
+
+                # Close the connection if the server requests it.
+                # Only closes when all packets have been received [when len(to_ack) == 0]
+                if self.received_fin == 1 and len(to_ack) == 0:
+                    self.tcp_close(ack_packet)
+                    self.reorder_data(rcvd_packs)
+                    break
+
+
+                #print("Last acked: " + str(self.last_acked) + " ACK: " + str(ack_packet.ack_no) + " Seq: " + str(ack_packet.seq_no))
+                #print("To_ACK: " + str(to_ack))
+
                 #Received packets that let me advance the sliding window by updating 'last_acked'
                 #This could be because we are up to date, or from catching a retransmission from the server.
                 if self.last_acked == ack_packet.seq_no:
@@ -469,16 +482,6 @@ class TCPHandler:
                 rcvd_packs[ack_packet.seq_no] = ack_packet.data # Adds the sequence # and payload data to dictionary
 
 
-                if ack_packet.fin == 1:
-                    self.received_fin = 1
-
-
-
-            # Close the connection if the server requests it.
-            # Only closes when all packets have been received [when len(to_ack) == 0]
-            if self.received_fin == 1 and len(to_ack) == 0:
-                self.reorder_data(rcvd_packs)
-                self.tcp_close(ack_packet)
 
 
     def reorder_data(self, packets):
@@ -496,15 +499,20 @@ class TCPHandler:
             otherwise the server's fin/ack packet is passed in."""
         client_close = 0
 
+        my_packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port)
         #First, send FIN or FIN/ACK packet
         if packet is None:
             #Client requesting shutdown
+            print("client shutdown.")
             client_close = 1
-            packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port)
-            fin_packet = packet.gen_hdr_to_send("fin", self.seq_num, self.ack_num)
+            self.ack_num = self.ack_num + 1
+            fin_packet = my_packet.gen_hdr_to_send("fin", self.seq_num, self.ack_num)
         else:
             #Server requesting shutdown
-            fin_packet = packet.gen_hdr_to_send("fin,ack", self.seq_num, self.ack_num)
+            self.seq_num = packet.ack_no
+            self.ack_num = self.ack_num + 1
+            fin_packet = my_packet.gen_hdr_to_send("fin,ack", self.seq_num, self.ack_num)
+        print("sending fin or fin/ack")
         self.pass_to_IP(fin_packet)
 
         #Next, wait for ACK
@@ -514,15 +522,17 @@ class TCPHandler:
                 self.cwnd = 1
                 self.pass_to_IP(fin_packet)
             elif received.ack == 1 and received.ack_no == (self.seq_num + 1):
+                print("final ack received.")
                 self.ack_num = received.seq_no + 1
                 self.seq_num = received.ack_no
                 break
 
         if client_close == 1:
             #Client still needs to send a final ACK before closing
-            last_ack = packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
+            last_ack = my_packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
+            self.pass_to_IP(last_ack)
 
-        self.sock.close()
+        #self.sock.close()
 
 
 
