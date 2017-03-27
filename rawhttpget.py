@@ -104,7 +104,6 @@ class IPHeader:
             self.bad_packet = 1
 
 
-
 class IPHandler:
     """Handles all IP layer operations"""
 
@@ -125,8 +124,9 @@ class IPHandler:
             self.sendsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
             self.recvsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
             self.src_addr = get_local_ip()
-            self.recvsock.bind((self.src_addr, 0))
-            self.src_port = self.recvsock.getsockname()[1]
+            self.sendsock.bind((self.src_addr, 0))
+            #self.recvsock.bind((self.src_addr, 0))
+            self.src_port = self.sendsock.getsockname()[1]
             self.recvsock.setblocking(0)
             print("SRC IP:PORT: " + self.src_addr + ":" + str(self.src_port))
         except socket.error, msg:
@@ -152,8 +152,6 @@ class IPHandler:
                 received, addr = self.recvsock.recvfrom(65535)
             except:
                 continue
-                #print("Error while receiving IP packet.")
-                #sys.exit(1)
             if addr[0] == self.dst_addr:
                 packet.parse(received)
 
@@ -207,7 +205,7 @@ class TCPHeader:
         self.rst = 0
         self.syn = 0
         self.fin = 0
-        self.wnd = 4096
+        self.wnd = 65535
         self.check = 0
         self.flags = self.fin + (self.syn << 1) + (self.rst << 2) + (self.psh << 3) + (self.ack << 4) + (self.urg << 5)
         self.urg_ptr = 0
@@ -224,6 +222,10 @@ class TCPHeader:
 
     def gen_hdr_to_send(self, flags, seq_num, ack_num):
         """Update the TCP header that gets passed to IP for sending"""
+        self.check = 0
+        self.offset = 5
+        self.offset_reserved = (self.offset << 4) + 0
+        self.urg_ptr = 0
         self.urg = 0
         self.psh = 0
         self.ack = 0
@@ -240,7 +242,7 @@ class TCPHeader:
             self.fin = 1
             self.data = ""
         if "psh" in flag_list: self.psh = 1
-        #if "urg" in flag_list: self.urg = 1
+        if "urg" in flag_list: self.urg = 1
         self.flags = self.fin + (self.syn << 1) + (self.rst << 2) + (self.psh << 3) + (self.ack << 4) + (self.urg << 5)
         self.wnd = 65535
         self.seq_no = seq_num
@@ -278,7 +280,6 @@ class TCPHeader:
         self.gen_pseudohdr()
         if checksum(self.pseudo + packet) != 0:
             self.bad_packet = 1
-
 
 
 class TCPHandler:
@@ -404,14 +405,11 @@ class TCPHandler:
                 self.seq_num = ack_packet.ack_no
                 self.last_acked = ack_packet.seq_no
                 self.ack_num = ack_packet.seq_no + len(ack_packet.data)
-                print("LA: " + str(self.last_acked) + " self.ack_num: " + str(self.ack_num) + " self.seq_num: " + str(self.seq_num))
-                print("Received ACK: " + str(ack_packet.ack_no) + " Received SEQ: " + str(ack_packet.seq_no))
                 if self.cwnd < 1000:
                     self.cwnd = self.cwnd + 1
                 break
             else:
-                #Our HTTP packet hasn't been acked, but we've received some legitimate packet out of order
-                print("Early out of order?")
+                #Haven't seen our HTTP packet acked yet, but we've received some legitimate packet out of order
                 rcvd_packs[ack_packet.seq_no] = ack_packet.data  # Adds the sequence # and payload data to dictionary
                 to_ack.append(ack_packet.seq_no)
                 self.pass_to_IP(to_send) # send duplicate ACK
@@ -423,6 +421,12 @@ class TCPHandler:
         while True:
             ack_packet = self.receive_from_IP()
             if ack_packet is not None:
+
+                #Closes socket if server requests reset
+                if ack_packet.rst == 1:
+                    self.tcp_close(ack_packet)
+                    sys.exit(1)
+
                 print("Last acked: " + str(self.last_acked) + " ACK: " + str(ack_packet.ack_no) + " Seq: " + str(ack_packet.seq_no))
                 print("To_ACK: " + str(to_ack))
                 #Received packets that let me advance the sliding window by updating 'last_acked'
@@ -468,9 +472,7 @@ class TCPHandler:
                 if ack_packet.fin == 1:
                     self.received_fin = 1
 
-                #Closes socket if server requests reset
-                if ack_packet.rst == 1:
-                    self.tcp_close(ack_packet)
+
 
             # Close the connection if the server requests it.
             # Only closes when all packets have been received [when len(to_ack) == 0]
