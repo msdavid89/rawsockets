@@ -7,6 +7,8 @@ import struct
 from random import randint
 import time
 
+HTTP_PORT = 80
+MAX_BYTES = 65535
 
 def checksum(msg):
     if len(msg) % 2 == 1:
@@ -22,7 +24,7 @@ def checksum(msg):
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.connect(("8.8.8.8", 80))
+    s.connect(("8.8.8.8", HTTP_PORT))
     hostname = s.getsockname()[0]
     s.close()
     return hostname
@@ -72,7 +74,7 @@ class IPHeader:
 
     def gen_hdr_to_send(self):
         """Creates an IP header and prepends it to packet to send to server"""
-        self.id = randint(0,65535)
+        self.id = randint(0,MAX_BYTES)
         self.length = self.ihl * 4 + len(self.payload)
         src_ip = socket.inet_aton(self.src_ip)
         dst_ip = socket.inet_aton(self.dst_ip)
@@ -116,7 +118,7 @@ class IPHandler:
         self.recvsock = -1
 
 
-    def update_addr_info(self, dst_ip="", dst_port=80):
+    def update_addr_info(self, dst_ip="", dst_port=HTTP_PORT):
         self.dst_addr = dst_ip
         self.dst_port = dst_port
         try:
@@ -148,7 +150,7 @@ class IPHandler:
         while time.time() - begin < 180:
             packet = IPHeader()
             try:
-                received, addr = self.recvsock.recvfrom(65535)
+                received, addr = self.recvsock.recvfrom(MAX_BYTES)
             except:
                 continue
             if addr[0] == self.dst_addr:
@@ -187,7 +189,7 @@ class TCPHeader:
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     """
 
-    def __init__(self, src_ip="", dst_ip="", src_port=0, dst_port=80, payload=""):
+    def __init__(self, src_ip="", dst_ip="", src_port=0, dst_port=HTTP_PORT, payload=""):
         self.src_port = src_port
         self.dst_port = dst_port
         self.seq_no = 0
@@ -200,7 +202,7 @@ class TCPHeader:
         self.rst = 0
         self.syn = 0
         self.fin = 0
-        self.wnd = 65535
+        self.wnd = MAX_BYTES
         self.check = 0
         self.flags = self.fin + (self.syn << 1) + (self.rst << 2) + (self.psh << 3) + (self.ack << 4) + (self.urg << 5)
         self.urg_ptr = 0
@@ -239,7 +241,7 @@ class TCPHeader:
         if "psh" in flag_list: self.psh = 1
         if "urg" in flag_list: self.urg = 1
         self.flags = self.fin + (self.syn << 1) + (self.rst << 2) + (self.psh << 3) + (self.ack << 4) + (self.urg << 5)
-        self.wnd = 65535
+        self.wnd = MAX_BYTES
         self.seq_no = seq_num
         self.ack_no = ack_num
         self.tcp_header = struct.pack('!HHLLBBHHH', self.src_port, self.dst_port, self.seq_no, self.ack_no, self.offset_reserved, self.flags, self.wnd, self.check, self.urg_ptr)
@@ -296,7 +298,7 @@ class TCPHandler:
         self.max_packs = min(self.cwnd, self.adv_wnd)
         self.webpage = ''
 
-    def tcp_connect(self, dst, port=80):
+    def tcp_connect(self, dst, port=HTTP_PORT):
         """This function establishes the initial TCP connection with the remote server
             and performs the three-way handshake."""
         #Update the IPHandler with our remote IP/Port
@@ -307,7 +309,7 @@ class TCPHandler:
         self.local_ip = self.sock.src_addr
 
         #Three-Way Handshake
-        self.seq_num = randint(0,65535)
+        self.seq_num = randint(0,MAX_BYTES)
         packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port)
         syn_packet = packet.gen_hdr_to_send("syn", self.seq_num, self.ack_num)
         self.pass_to_IP(syn_packet)
@@ -568,7 +570,7 @@ class RawGet:
         """This is a handler for our application's interface with the TCP protocol. It establishes the connection,
             sends our HTTP payload, and receives the response."""
         try:
-            self.sock.tcp_connect(self.host, 80)
+            self.sock.tcp_connect(self.host, HTTP_PORT)
             received = self.pass_to_tcp()
         except:
             sys.exit("Error!")

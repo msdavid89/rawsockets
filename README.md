@@ -3,25 +3,65 @@ Project 4 - CS5700
 
 Project link: http://david.choffnes.com/classes/cs4700sp17/project4.php
 
+
+TO DO: clean up code and add comments. Check the TCP flow for when duplicate packets arrive or are sent out of order.
+
+
+
 Responsibilities
-----------------------
-Michael:
-Oladipupo:
+-----------------------------------
+Michael: TCP and HTTP code
+
+Oladipupo: IP code and checksums
+-----------------------------------
+
+To run the code
+-----------------------------------
+Need to disable TCP checksum offloading to run in VM, configure iptables, etc. This is addressed in the Makefile.
+
+-------------------------------------
+
+Architecture:
+
+We attempted to separate each of the three relevant layers (Application/HTTP, TCP, and IP) into their own sections.
+
+TCP and IP each have their own classes to manage their portion of the connection as well as a class for the
+header. The idea was to make this "similar" to how an operating system might implement them. Alternatively, we
+considered having a send-side class to handle outgoing traffic and a receiving class to handle incoming traffic,
+but a layered approach is more intuitive.
+
+-------------------------------------------
 
 
-Notes: Need to disable TCP checksum offloading to run in VM, configure iptables, etc.
+Challenges:
 
--Currently doesn't deal with MTU for sending, but just attempts to send entire payload in one packet. This would
-be fine for most "normal" inputs but a malicious input would cause issues. Note that the minimum MTU over IP is 68
-bytes, but substracting the IP/TCP headers it is only 28 bytes, and our payload will be more than that.
-----We can extract the MTU from the TCP packet received, if given.
--If we don't receive data from the server for 3 minutes, close the connection.
--For IPHeader, do flags and offset matter? Currently I just set them to 0
+There were a couple major areas where we got stuck.
+
+1. It took a while before we were even able to get the low-level networking right.
+
+2. In particular, we spent a full day trying to figure out why our code was able to successfully complete
+the handshake, send an HTTP GET message and receive the corresponding ACK, but then the server would continuously
+retransmit their initial response despite us being up-to-date with our ACKs. It turned out that the problem was that
+we weren't resetting the checksum of our TCP packets to 0 before calculating it for the next packet, so our ACKs
+were getting dropped due to bad checksums at the other end.
+
+3. There were similar issues with the FIN packets at the end, and not incrementing the sequence number properly.
+
+
+-------------------------------------
+
+Assorted:
+
 -We choose our sequence number between 0 and 65535, but it can go up to 4 billion or so. We should implement the
-maximum sequence number with wrap around, otherwise if the server sends us a high sequence number we won't respond
-appropriately.
+maximum sequence number with wrap around, otherwise if the server sends us a particularly high sequence number we won't
+respond appropriately. Also, we are more susceptible to attacks that might guess the sequence #.
 
+-Our implementation ACKs every packet received (except duplicates). It would be more efficient sending cumulative ACKs.
 
--We do not use Connection: keep-alive in our HTTP header. This allows us to detect when the server is finished sending
-the file simply by looking for a FIN packet.
--Our implementation ACKs every packet received (except duplicates). It could be more efficient sending cumulative ACKs.
+------------------------------------------
+
+MD5:
+
+50 MB file: bf6a729296a1949057ef3fa984b88950
+2 MB file: a6020a2bd05e9217f52bc1568cc28077
+Project4 web page: d8d4d3d065d1ab59a7908775c39249c3
