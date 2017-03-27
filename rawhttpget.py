@@ -120,15 +120,14 @@ class IPHandler:
         self.dst_addr = dst_ip
         self.dst_port = dst_port
         try:
-            print("DST IP/port: " + self.dst_addr + ":" + str(self.dst_port))
+            #print("DST IP/port: " + self.dst_addr + ":" + str(self.dst_port))
             self.sendsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
             self.recvsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
             self.src_addr = get_local_ip()
             self.sendsock.bind((self.src_addr, 0))
-            #self.recvsock.bind((self.src_addr, 0))
             self.src_port = self.sendsock.getsockname()[1]
             self.recvsock.setblocking(0)
-            print("SRC IP:PORT: " + self.src_addr + ":" + str(self.src_port))
+            #print("SRC IP:PORT: " + self.src_addr + ":" + str(self.src_port))
         except socket.error, msg:
             print("Failed to create sockets. Womp womp. " + str(msg[1]))
             sys.exit()
@@ -159,11 +158,6 @@ class IPHandler:
                     return packet.payload
 
 
-
-    def close(self):
-        print("Final close code.")
-        self.sendsock.close()
-        self.recvsock.close()
 
 ########################################################################################################
 ################~~~~~~~~~~~~~~TCP (transport layer) API~~~~~~~~~~~~~~~~~~~~~~###########################
@@ -451,7 +445,6 @@ class TCPHandler:
                         to_ack.remove(ack_packet.seq_no)
                     else:
                         #We are caught up and receiving packets in order
-                        print("Caught up, receiving in order.")
                         del to_ack[:]
                     self.ack_num = ack_packet.seq_no + len(ack_packet.data)
                     my_ack = my_packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
@@ -503,7 +496,6 @@ class TCPHandler:
         #First, send FIN or FIN/ACK packet
         if packet is None:
             #Client requesting shutdown
-            print("client shutdown.")
             client_close = 1
             self.ack_num = self.ack_num + 1
             fin_packet = my_packet.gen_hdr_to_send("fin", self.seq_num, self.ack_num)
@@ -512,7 +504,6 @@ class TCPHandler:
             self.seq_num = packet.ack_no
             self.ack_num = self.ack_num + 1
             fin_packet = my_packet.gen_hdr_to_send("fin,ack", self.seq_num, self.ack_num)
-        print("sending fin or fin/ack")
         self.pass_to_IP(fin_packet)
 
         #Next, wait for ACK
@@ -522,7 +513,6 @@ class TCPHandler:
                 self.cwnd = 1
                 self.pass_to_IP(fin_packet)
             elif received.ack == 1 and received.ack_no == (self.seq_num + 1):
-                print("final ack received.")
                 self.ack_num = received.seq_no + 1
                 self.seq_num = received.ack_no
                 break
@@ -531,8 +521,6 @@ class TCPHandler:
             #Client still needs to send a final ACK before closing
             last_ack = my_packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
             self.pass_to_IP(last_ack)
-
-        #self.sock.close()
 
 
 
@@ -586,16 +574,15 @@ class RawGet:
             sys.exit("Error!")
         if received:
             html = self.parse_http(received)
-            html_file = open(self.file_name, "wb+")
+            html_file = open(self.file_name, "wb")
             html_file.write(html)
+            html_file.close()
 
 
     def pass_to_tcp(self):
         """Wrapper for sending the HTTP GET request down to the TCP layer and retrieving the result"""
         try:
-            print("Request: " + self.request)
             self.sock.send(self.request)
-            print("Got back from send.")
         except socket.error:
             sys.exit("Error while sending.")
         return self.sock.webpage
@@ -617,11 +604,13 @@ class RawGet:
             sys.exit(1)
 
         if "Transfer-Encoding: chunked" not in header:
-            pos = header.find("Content-Length: ") + 17
+            pos = header.find("Content-Length: ") + 16
             slen = ""
-            while header.isnum(pos):
+            while header[pos].isdigit():
                 slen = slen + header[pos]
+                pos = pos + 1
             length = int(slen)
+            print("slen: " + slen + " length: " + str(length))
             return body[:length]
         else:
             #Chunked encoding, so return only the odd lines of the body until seeing "0"
@@ -633,7 +622,8 @@ class RawGet:
                     return page
                 if line_num % 2 == 1:
                     page = page + l
-
+                line_num = line_num + 1
+            return page
 
 
 
