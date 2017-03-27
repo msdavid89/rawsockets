@@ -6,7 +6,6 @@ import socket
 import struct
 from random import randint
 import time
-import signal
 
 
 def checksum(msg):
@@ -127,8 +126,8 @@ class IPHandler:
             self.recvsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
             self.src_addr = get_local_ip()
             self.recvsock.bind((self.src_addr, 0))
-            #self.recvsock.listen(1)
             self.src_port = self.recvsock.getsockname()[1]
+            self.recvsock.setblocking(0)
             print("SRC IP:PORT: " + self.src_addr + ":" + str(self.src_port))
         except socket.error, msg:
             print("Failed to create sockets. Womp womp. " + str(msg[1]))
@@ -146,13 +145,15 @@ class IPHandler:
 
 
     def recv(self):
-        while True:
+        begin = time.time()
+        while time.time() - begin < 180:
             packet = IPHeader()
             try:
                 received, addr = self.recvsock.recvfrom(65535)
             except:
-                print("Error while receiving IP packet.")
-                sys.exit(1)
+                continue
+                #print("Error while receiving IP packet.")
+                #sys.exit(1)
             if addr[0] == self.dst_addr:
                 packet.parse(received)
 
@@ -298,7 +299,6 @@ class TCPHandler:
         self.timed_out = 0 #Set to 1 when an RTO has occurred
         self.max_packs = min(self.cwnd, self.adv_wnd)
         self.webpage = ''
-        self.interrupted = 0
 
     def tcp_connect(self, dst, port=80):
         """This function establishes the initial TCP connection with the remote server
@@ -383,10 +383,6 @@ class TCPHandler:
         TODO: Divide payload into properly sized chunks. Flow control (handle advertised window). Congestion avoidance.
         """
 
-        #If we've made it to this point, there is a live TCP connection. If we need to interrupt the program,
-        #this signal handler will allow us to cleanly shut down the connection.
-        signal.signal(signal.SIGINT, self.handler)
-
         packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port, payload)
         to_send = packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
         self.pass_to_IP(to_send)
@@ -428,6 +424,7 @@ class TCPHandler:
             ack_packet = self.receive_from_IP()
             if ack_packet is not None:
                 print("Last acked: " + str(self.last_acked) + " ACK: " + str(ack_packet.ack_no) + " Seq: " + str(ack_packet.seq_no))
+                print("To_ACK: " + str(to_ack))
                 #Received packets that let me advance the sliding window by updating 'last_acked'
                 #This could be because we are up to date, or from catching a retransmission from the server.
                 if self.last_acked == ack_packet.seq_no:
@@ -446,10 +443,18 @@ class TCPHandler:
                 #Received duplicate packet from server, drop it
                 elif rcvd_packs.has_key(ack_packet.seq_no):
                     print("Drop duplicate packet.")
-                    pass
+                    my_ack = my_packet.gen_hdr_to_send("ack", ack_packet.ack_no, ack_packet.seq_no + len(ack_packet.data))
+                    self.ack_num = ack_packet.seq_no + len(ack_packet.data)
+                    self.pass_to_IP(my_ack)
+                    self.last_acked = self.ack_num
+                    keys = rcvd_packs.keys()
+                    print("Keys: " + str(keys))
+                    for k in keys:
+                        if k >= ack_packet.seq_no:
+                            del rcvd_packs[k]
                 #Fallen behind/packets out of order;
                 else:
-                    to_ack.append(ack_packet.seq_no)
+                    to_ack.append(ack_packet.seq_no + len(ack_packet.data))
                     if my_ack:
                         print("Packet out of order.")
                         self.pass_to_IP(my_ack)
@@ -483,11 +488,6 @@ class TCPHandler:
         for d in data_list:
             self.webpage = self.webpage + d
 
-    def handler(self, signum, frame):
-        print("Gracefully close connection after receiving interrupt.")
-        self.interrupted = 1
-        self.tcp_close()
-        sys.exit(0)
 
     def tcp_close(self, packet=None):
         """Close the TCP connection. Default fin_packet is used when the client shuts down connection,
@@ -499,13 +499,7 @@ class TCPHandler:
             #Client requesting shutdown
             client_close = 1
             packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port)
-            if self.interrupted != 1:
-                fin_packet = packet.gen_hdr_to_send("fin", self.seq_num, self.ack_num)
-            else:
-                #In case user interrupts the program, reset connection
-                rst_packet = packet.gen_hdr_to_send("rst,ack", self.seq_num + 1, 0)
-                self.pass_to_IP(rst_packet)
-                sys.exit(0)
+            fin_packet = packet.gen_hdr_to_send("fin", self.seq_num, self.ack_num)
         else:
             #Server requesting shutdown
             fin_packet = packet.gen_hdr_to_send("fin,ack", self.seq_num, self.ack_num)
