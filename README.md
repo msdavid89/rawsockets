@@ -4,10 +4,6 @@ Project 4 - CS5700
 Project link: http://david.choffnes.com/classes/cs4700sp17/project4.php
 
 
-TO DO: Check the TCP flow for when duplicate packets arrive or are sent out of order.
-
-
-
 Responsibilities
 -----------------------------------
 Michael: TCP and HTTP code
