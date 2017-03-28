@@ -11,6 +11,8 @@ HTTP_PORT = 80
 MAX_BYTES = 65535
 
 def checksum(msg):
+    """Calculate checksum for both IP and TCP headers. If the length of the message is odd,
+        add one 0 byte."""
     if len(msg) % 2 == 1:
         msg = msg + struct.pack('B', 0)
     s = 0
@@ -23,6 +25,7 @@ def checksum(msg):
     return s
 
 def get_local_ip():
+    """Find the local IP address for machine this code is running on."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect(("8.8.8.8", HTTP_PORT))
     hostname = s.getsockname()[0]
@@ -85,21 +88,18 @@ class IPHeader:
         return self.ip_header + self.payload
 
     def parse(self, packet):
-        """Parses the packet header passed in, after receiving from the network."""
+        """Parses the packet header passed in, after receiving from the network. This allows us to work with
+            the packet, see if it is destined for our program, etc. Tests the checksum as well."""
         header = packet[0:20]
         self.ip_ihl_ver, self.tos, self.length, self.id, flag_off, self.ttl, self.proto = struct.unpack('!BBHHHBB', header[0:10])
         self.chksum = struct.unpack('H', header[10:12])
         src_ip, dst_ip = struct.unpack('!4s4s', header[12:20])
         self.version = self.ip_ihl_ver >> 4
         self.ihl = self.ip_ihl_ver & 0x0f
-
-        #Not sure if flags or offset matter
         self.flags = 0
         self.offset = 0
-
         self.src_ip = socket.inet_ntoa(src_ip)
         self.dst_ip = socket.inet_ntoa(dst_ip)
-
         self.payload = packet[20:]
 
         if checksum(header) != 0:
@@ -119,16 +119,19 @@ class IPHandler:
 
 
     def update_addr_info(self, dst_ip="", dst_port=HTTP_PORT):
+        """Updates our address information and creates the sending and receiving sockets. This is basically
+            the 'setup' for our network layer operations."""
         self.dst_addr = dst_ip
         self.dst_port = dst_port
         try:
-            #print("DST IP/port: " + self.dst_addr + ":" + str(self.dst_port))
             self.sendsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
             self.recvsock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
             self.src_addr = get_local_ip()
             self.sendsock.bind((self.src_addr, 0))
             self.src_port = self.sendsock.getsockname()[1]
             self.recvsock.setblocking(0)
+
+            #print("DST IP/port: " + self.dst_addr + ":" + str(self.dst_port))
             #print("SRC IP:PORT: " + self.src_addr + ":" + str(self.src_port))
         except socket.error, msg:
             print("Failed to create sockets. Womp womp. " + str(msg[1]))
@@ -136,6 +139,8 @@ class IPHandler:
 
 
     def send(self, payload):
+        """Passed a 'payload' from the TCP layer, this generates the IP header to encapsulate it in, and then
+            sends it to our destination."""
         packet = IPHeader(self.src_addr, self.dst_addr, payload)
         to_send = packet.gen_hdr_to_send()
         try:
@@ -146,6 +151,8 @@ class IPHandler:
 
 
     def recv(self):
+        """Receives an IPv4 packet from the network. Waits 3 minutes before timing out. Tests to make sure the
+            we only pass up to TCP packets that come from the remote address."""
         begin = time.time()
         while time.time() - begin < 180:
             packet = IPHeader()
@@ -158,7 +165,9 @@ class IPHandler:
 
                 if packet.proto == socket.IPPROTO_TCP and packet.src_ip == self.dst_addr and packet.dst_ip == self.src_addr and packet.bad_packet == 0:
                     return packet.payload
-
+        else:
+            print("Haven't received packet in 3 minutes. Ending.")
+            sys.exit(1)
 
 
 ########################################################################################################
@@ -218,7 +227,8 @@ class TCPHeader:
 
 
     def gen_hdr_to_send(self, flags, seq_num, ack_num):
-        """Update the TCP header that gets passed to IP for sending"""
+        """Update the TCP header that gets passed to IP for sending. Includes any data passed from the application
+            layer, but most of the time will only be a header with the ACK flag set. """
         self.check = 0
         self.offset = 5
         self.offset_reserved = (self.offset << 4) + 0
@@ -254,13 +264,14 @@ class TCPHeader:
 
 
     def gen_pseudohdr(self):
-        """Update the TCP 'pseudoheader' to be used in checksum"""
+        """Calculate the TCP 'pseudoheader' to be used in checksum"""
         src_addr = socket.inet_aton(self.src_ip)
         dst_addr = socket.inet_aton(self.dst_ip)
         self.pseudo = struct.pack("!4s4sBBH", src_addr, dst_addr, 0, socket.IPPROTO_TCP, self.offset * 4 + len(self.data))
 
     def parse(self, packet):
-        #Get TCP packet information from incoming packet
+        """Get TCP packet information from incoming packet so we can handle it appropriately. Performs checksum
+            verification."""
         self.src_port, self.dst_port, self.seq_no, self.ack_no, off, flags, self.wnd = struct.unpack("!HHLLBBH", packet[0:16])
         self.check = struct.unpack("H", packet[16:18])
         self.urg_ptr = struct.unpack("!H", packet[18:20])
@@ -273,7 +284,7 @@ class TCPHeader:
         self.urg = (flags & 0x20) >> 5
         self.data = packet[self.offset * 4:]
 
-        #Verify
+        #Verify checksum
         self.gen_pseudohdr()
         if checksum(self.pseudo + packet) != 0:
             self.bad_packet = 1
@@ -301,20 +312,21 @@ class TCPHandler:
     def tcp_connect(self, dst, port=HTTP_PORT):
         """This function establishes the initial TCP connection with the remote server
             and performs the three-way handshake."""
-        #Update the IPHandler with our remote IP/Port
+
+        #Update the IPHandler with our remote IP/Port, as well as fill in that info for our TCPHandler class.
         self.remote_ip = socket.gethostbyname(dst)
         self.remote_port = port
         self.sock.update_addr_info(self.remote_ip, self.remote_port)
         self.local_port = self.sock.src_port
         self.local_ip = self.sock.src_addr
 
-        #Three-Way Handshake
+        #Three-Way Handshake begins
         self.seq_num = randint(0,MAX_BYTES)
         packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port)
         syn_packet = packet.gen_hdr_to_send("syn", self.seq_num, self.ack_num)
         self.pass_to_IP(syn_packet)
 
-        #Receive syn/ack packet, willing to make several attempts
+        #Receive syn/ack packet, willing to make several attempts before giving up.
         connection_attempts = 0
         while connection_attempts < 4:
             synack = self.receive_from_IP()
@@ -330,12 +342,11 @@ class TCPHandler:
             sys.exit(1)
 
         if synack.syn == 1 and synack.ack == 1 and synack.ack_no == (self.seq_num + 1):
-            #We've received the correct syn/ack packet for the handshake
+            #We've received the correct syn/ack packet for the handshake, so we update our sequence and acknowledgement
+            #numbers to pass back to server.
             self.seq_num = synack.ack_no
             self.ack_num = synack.seq_no + 1
             self.adv_wnd = synack.wnd
-            if self.cwnd < 1000:
-                self.cwnd = self.cwnd + 1
 
         #Respond with ack packet to complete handshake
         ack_packet = packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
@@ -343,7 +354,7 @@ class TCPHandler:
 
 
     def pass_to_IP(self, payload):
-        """Wrapper that passes TCP payload data down to IP layer"""
+        """Wrapper that passes TCP payload data down to IP layer."""
         try:
             self.timed_out = 0
             self.sock.send(payload)
@@ -354,7 +365,7 @@ class TCPHandler:
     def receive_from_IP(self):
         """Interface for accepting a packet from the network layer and generating a TCP header/data from it."""
         begin = time.time()
-        #Allow 1 minute to receive a packet
+        #Allow 1 minute to receive a packet before resending
         while ((time.time() - begin) < 60):
             packet = TCPHeader()
             try:
@@ -368,6 +379,8 @@ class TCPHandler:
             #Only accept packets destined for our application's local port, from the server we expect
             if packet.src_port == self.remote_port and packet.dst_port == self.local_port and packet.bad_packet == 0:
                 self.timed_out = 0
+                if self.cwnd < 1000:
+                    self.cwnd = self.cwnd + 1
                 return packet
 
         #If TCP doesn't receive an ACK within 60 seconds, handle RTO
@@ -376,11 +389,11 @@ class TCPHandler:
 
 
     def send(self, payload):
-        """Ensures reliable, in-order delivery of all the data to be sent
+        """This function is the workhorse of our TCPHandler class. It ensures reliable, in-order delivery of all
+            the data to be sent and received from the network. Returns to the application layer the server's
+            HTTP response."""
 
-        TODO: Divide payload into properly sized chunks. Flow control (handle advertised window). Congestion avoidance.
-        """
-
+        #Send our HTTP GET request
         packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port, payload)
         to_send = packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
         self.pass_to_IP(to_send)
@@ -397,23 +410,24 @@ class TCPHandler:
                 self.cwnd = 1
                 self.pass_to_IP(to_send)
 
-            # Check if our HTTP GET packet has been acked
+            # Check if our HTTP GET packet has been acked. If so, update seq/ack #'s.
             if ack_packet.ack_no == self.seq_num + len(payload):
                 self.seq_num = ack_packet.ack_no
                 self.last_acked = ack_packet.seq_no
                 self.ack_num = ack_packet.seq_no + len(ack_packet.data)
-                if self.cwnd < 1000:
-                    self.cwnd = self.cwnd + 1
                 break
             else:
                 #Haven't seen our HTTP packet acked yet, but we've received some legitimate packet out of order
                 rcvd_packs[ack_packet.seq_no] = ack_packet.data  # Adds the sequence # and payload data to dictionary
                 to_ack.append(ack_packet.seq_no)
                 self.pass_to_IP(to_send) # send duplicate ACK
-
+        else:
+            #Haven't received an ACK from the server for 3 minutes, so exit program
+            print("Timed out while waiting for ACK.")
+            sys.exit(1)
 
         #This part handles the packets of data we receive from the server, including dealing with duplicates
-        #and packets arriving in the wrong order.
+        #and packets arriving in the wrong order. It also passes control to the tcp_close() method when finished.
         my_packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port)
         while True:
             ack_packet = self.receive_from_IP()
@@ -435,7 +449,7 @@ class TCPHandler:
                     break
 
 
-                #print("Last acked: " + str(self.last_acked) + " ACK: " + str(ack_packet.ack_no) + " Seq: " + str(ack_packet.seq_no))
+                #print("Last acked: " + str(self.last_acked) + " Received ACK: " + str(ack_packet.ack_no) + " Received Seq: " + str(ack_packet.seq_no))
                 #print("To_ACK: " + str(to_ack))
 
                 #Received packets that let me advance the sliding window by updating 'last_acked'
@@ -443,7 +457,6 @@ class TCPHandler:
                 if self.last_acked == ack_packet.seq_no:
                     if ack_packet.seq_no in to_ack:
                         #Catching up from retransmissions or out of order arrivals
-                        print("Catching up.")
                         to_ack.remove(ack_packet.seq_no)
                     else:
                         #We are caught up and receiving packets in order
@@ -481,7 +494,7 @@ class TCPHandler:
 
     def reorder_data(self, packets):
         """After receiving all the packets from the server, we need to put the data received in order for
-            easy access for HTTP"""
+            easy access and parsing for HTTP"""
         packet_list = packets.items()
         packet_list.sort()
         data_list = [x[1] for x in packet_list]
@@ -490,8 +503,8 @@ class TCPHandler:
 
 
     def tcp_close(self, packet=None):
-        """Close the TCP connection. Default fin_packet is used when the client shuts down connection,
-            otherwise the server's fin/ack packet is passed in."""
+        """Close the TCP connection both when the server requests it or the client. The packet parameter will be
+            none if our client is requesting to close the connection."""
         client_close = 0
 
         my_packet = TCPHeader(self.local_ip, self.remote_ip, self.local_port, self.remote_port)
@@ -508,8 +521,9 @@ class TCPHandler:
             fin_packet = my_packet.gen_hdr_to_send("fin,ack", self.seq_num, self.ack_num)
         self.pass_to_IP(fin_packet)
 
-        #Next, wait for ACK
-        while True:
+        #Next, wait for ACK of our FIN packet from the server.
+        begin = time.time()
+        while time.time() - begin < 180:
             received = self.receive_from_IP()
             if self.timed_out == 1:
                 self.cwnd = 1
@@ -518,6 +532,9 @@ class TCPHandler:
                 self.ack_num = received.seq_no + 1
                 self.seq_num = received.ack_no
                 break
+        else:
+            print("Did not receive ACK of our FIN packet. Ending program.")
+            sys.exit(1)
 
         if client_close == 1:
             #Client still needs to send a final ACK before closing
@@ -547,7 +564,7 @@ class RawGet:
 
 
     def start(self):
-        """The entry point for the application."""
+        """The entry point for the application. We construct our HTTP GET message here."""
         self.host, self.path = self.handle_url()
         self.request = "GET " + self.path + " HTTP/1.1\r\n" + "Host: " + self.host + "\r\n\r\n"
         self.handle_connection()
@@ -555,7 +572,7 @@ class RawGet:
 
     def handle_url(self):
         """Parse the URL from the command line into a hostname and path for the remote file we want to
-            download with an HTTP GET"""
+            download with an HTTP GET."""
         if "http://" not in self.url:
             self.url = "http://" + self.url
         host = urlparse(self.url)
@@ -568,7 +585,8 @@ class RawGet:
 
     def handle_connection(self):
         """This is a handler for our application's interface with the TCP protocol. It establishes the connection,
-            sends our HTTP payload, and receives the response."""
+            sends our HTTP payload, and receives the response. If we successfully get data, this also handles the
+            file I/O for our download."""
         try:
             self.sock.tcp_connect(self.host, HTTP_PORT)
             received = self.pass_to_tcp()
@@ -582,7 +600,7 @@ class RawGet:
 
 
     def pass_to_tcp(self):
-        """Wrapper for sending the HTTP GET request down to the TCP layer and retrieving the result"""
+        """Wrapper for sending the HTTP GET request down to the TCP layer and returning the result."""
         try:
             self.sock.send(self.request)
         except socket.error:
@@ -590,8 +608,8 @@ class RawGet:
         return self.sock.webpage
 
     def parse_http(self, data):
-        """Receives and unpacks the data returned from the server through the TCP layer, and then
-            writes the data to our HTML file."""
+        """Receives and unpacks the HTTP data returned from the server through the TCP layer, and gets the data ready
+            to be written to a file."""
         try:
             index = data.index("\r\n\r\n") + 4
         except:

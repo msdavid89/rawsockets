@@ -4,7 +4,7 @@ Project 4 - CS5700
 Project link: http://david.choffnes.com/classes/cs4700sp17/project4.php
 
 
-TO DO: clean up code and add comments. Check the TCP flow for when duplicate packets arrive or are sent out of order.
+TO DO: Check the TCP flow for when duplicate packets arrive or are sent out of order.
 
 
 
@@ -45,7 +45,9 @@ retransmit their initial response despite us being up-to-date with our ACKs. It 
 we weren't resetting the checksum of our TCP packets to 0 before calculating it for the next packet, so our ACKs
 were getting dropped due to bad checksums at the other end.
 
-3. There were similar issues with the FIN packets at the end, and not incrementing the sequence number properly.
+3. There were similar issues with the FIN packets at the end, and not incrementing the sequence number properly. At
+first, we were passing in the FIN packet received and updating that to send back, but this was problematic because
+our "response" had the local and remote ports reversed.
 
 
 -------------------------------------
