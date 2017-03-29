@@ -440,6 +440,9 @@ class TCPHandler:
 
                 if ack_packet.fin == 1:
                     self.received_fin = 1
+                    if len(ack_packet.data) != 0:
+                        rcvd_packs[ack_packet.seq_no] = ack_packet.data
+
 
                 # Close the connection if the server requests it.
                 # Only closes when all packets have been received [when len(to_ack) == 0]
@@ -449,44 +452,51 @@ class TCPHandler:
                     break
 
 
-                #print("Last acked: " + str(self.last_acked) + " Received ACK: " + str(ack_packet.ack_no) + " Received Seq: " + str(ack_packet.seq_no))
-                #print("To_ACK: " + str(to_ack))
-
                 #Received packets that let me advance the sliding window by updating 'last_acked'
                 #This could be because we are up to date, or from catching a retransmission from the server.
-                if self.last_acked == ack_packet.seq_no:
-                    if ack_packet.seq_no in to_ack:
-                        #Catching up from retransmissions or out of order arrivals
-                        to_ack.remove(ack_packet.seq_no)
-                    else:
-                        #We are caught up and receiving packets in order
-                        del to_ack[:]
+                if ack_packet.seq_no in to_ack:
+                    print("Packet in to_ack, SEQ#: " + str(ack_packet.seq_no))
+                    my_ack = my_packet.gen_hdr_to_send("ack", self.seq_num, ack_packet.seq_no + len(ack_packet.data))
+                    to_ack.remove(ack_packet.seq_no)
+                    if ack_packet.seq_no == self.last_acked:
+                        self.last_acked = ack_packet.seq_no + len(ack_packet.data)
+                    if ack_packet.seq_no == self.ack_num:
+                        self.ack_num = ack_packet.seq_no + len(ack_packet.data)
+                    self.pass_to_IP(my_ack)
+                elif self.last_acked == ack_packet.seq_no:
+                    print("A")
+                    self.last_acked = ack_packet.seq_no + len(ack_packet.data)
+                    my_ack = my_packet.gen_hdr_to_send("ack", self.seq_num, self.last_acked)
+                    if ack_packet.seq_no == self.ack_num:
+                        self.ack_num = self.last_acked
+                    self.pass_to_IP(my_ack)
+                elif self.ack_num == ack_packet.seq_no:
+                    print("B")
                     self.ack_num = ack_packet.seq_no + len(ack_packet.data)
                     my_ack = my_packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
                     self.pass_to_IP(my_ack)
-                    self.last_acked = self.ack_num
-                #Received duplicate packet from server, drop it
                 elif rcvd_packs.has_key(ack_packet.seq_no):
-                    print("Drop duplicate packet.")
-                    my_ack = my_packet.gen_hdr_to_send("ack", ack_packet.ack_no, ack_packet.seq_no + len(ack_packet.data))
-                    self.ack_num = ack_packet.seq_no + len(ack_packet.data)
-                    self.pass_to_IP(my_ack)
-                    self.last_acked = self.ack_num
-                    keys = rcvd_packs.keys()
-                    print("Keys: " + str(keys))
-                    for k in keys:
-                        if k >= ack_packet.seq_no:
-                            del rcvd_packs[k]
+                    # Received duplicate packet from server, drop it
+                    print("Drop duplicate packet. SEQ# " + str(ack_packet.seq_no))
+                    dup_ack = my_packet.gen_hdr_to_send("ack", ack_packet.ack_no, ack_packet.seq_no + len(ack_packet.data))
+                    self.pass_to_IP(dup_ack)
+                    if ack_packet.seq_no in to_ack:
+                        to_ack.remove(ack_packet.seq_no)
+                    continue
                 #Fallen behind/packets out of order;
                 else:
                     to_ack.append(ack_packet.seq_no + len(ack_packet.data))
                     if my_ack:
-                        print("Packet out of order.")
+                        print("Packet out of order. SEQ#: " + str(ack_packet.seq_no))
+                        if self.last_acked == self.ack_num:
+                            self.last_acked = ack_packet.seq_no + len(ack_packet.data)
+                        self.ack_num = ack_packet.seq_no + len(ack_packet.data)
                         self.pass_to_IP(my_ack)
                     else:
-                        #Still haven't received the first packet of data, but have received a later one
                         self.pass_to_IP(to_send)
 
+
+                #if ack_packet.seq_no not in rcvd_packs:
                 rcvd_packs[ack_packet.seq_no] = ack_packet.data # Adds the sequence # and payload data to dictionary
 
 
@@ -630,7 +640,6 @@ class RawGet:
                 slen = slen + header[pos]
                 pos = pos + 1
             length = int(slen)
-            print("slen: " + slen + " length: " + str(length))
             return body[:length]
         else:
             #Chunked encoding, so return only the odd lines of the body until seeing "0"
