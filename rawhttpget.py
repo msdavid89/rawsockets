@@ -432,7 +432,6 @@ class TCPHandler:
         while True:
             ack_packet = self.receive_from_IP()
             if ack_packet is not None:
-
                 #Closes socket if server requests reset
                 if ack_packet.rst == 1:
                     self.tcp_close(ack_packet)
@@ -455,7 +454,6 @@ class TCPHandler:
                 #Received packets that let me advance the sliding window by updating 'last_acked'
                 #This could be because we are up to date, or from catching a retransmission from the server.
                 if ack_packet.seq_no in to_ack:
-                    print("Packet in to_ack, SEQ#: " + str(ack_packet.seq_no))
                     my_ack = my_packet.gen_hdr_to_send("ack", self.seq_num, ack_packet.seq_no + len(ack_packet.data))
                     to_ack.remove(ack_packet.seq_no)
                     if ack_packet.seq_no == self.last_acked:
@@ -464,20 +462,17 @@ class TCPHandler:
                         self.ack_num = ack_packet.seq_no + len(ack_packet.data)
                     self.pass_to_IP(my_ack)
                 elif self.last_acked == ack_packet.seq_no:
-                    print("A")
                     self.last_acked = ack_packet.seq_no + len(ack_packet.data)
                     my_ack = my_packet.gen_hdr_to_send("ack", self.seq_num, self.last_acked)
                     if ack_packet.seq_no == self.ack_num:
                         self.ack_num = self.last_acked
                     self.pass_to_IP(my_ack)
                 elif self.ack_num == ack_packet.seq_no:
-                    print("B")
                     self.ack_num = ack_packet.seq_no + len(ack_packet.data)
                     my_ack = my_packet.gen_hdr_to_send("ack", self.seq_num, self.ack_num)
                     self.pass_to_IP(my_ack)
                 elif rcvd_packs.has_key(ack_packet.seq_no):
                     # Received duplicate packet from server, drop it
-                    print("Drop duplicate packet. SEQ# " + str(ack_packet.seq_no))
                     dup_ack = my_packet.gen_hdr_to_send("ack", ack_packet.ack_no, ack_packet.seq_no + len(ack_packet.data))
                     self.pass_to_IP(dup_ack)
                     if ack_packet.seq_no in to_ack:
